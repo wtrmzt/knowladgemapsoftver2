@@ -1,0 +1,10 @@
+Flask
+Flask-SQLAlchemy
+Flask-Cors
+PyJWT
+pandas
+gunicorn
+openai
+requests
+spacy
+numpy
