@@ -1,15 +1,6 @@
 // src/services/apiClient.ts
 import axios from 'axios';
 
-// TypeScript: Extend ImportMeta to recognize import.meta.env
-interface ImportMetaEnv {
-  VITE_API_URL?: string;
-}
-
-interface ImportMeta {
-  env: ImportMetaEnv;
-}
-
 console.log("apiClient.ts: Module loaded.");
 
 // ★★★ 修正点: localStorageのキーをここで定義し、authServiceと共通化する ★★★
