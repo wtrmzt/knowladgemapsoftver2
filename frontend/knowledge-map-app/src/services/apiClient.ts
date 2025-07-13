@@ -1,13 +1,22 @@
 // src/services/apiClient.ts
 import axios from 'axios';
 
+// TypeScript: Extend ImportMeta to recognize import.meta.env
+interface ImportMetaEnv {
+  VITE_API_URL?: string;
+}
+
+interface ImportMeta {
+  env: ImportMetaEnv;
+}
+
 console.log("apiClient.ts: Module loaded.");
 
 // ★★★ 修正点: localStorageのキーをここで定義し、authServiceと共通化する ★★★
 const AUTH_TOKEN_KEY = 'appToken';
 
 const apiClient = axios.create({
-  baseURL: 'http://127.0.0.1:5001/api',
+  baseURL: import.meta.env.VITE_API_URL || 'http://127.0.0.1:5001/api',
   headers: {
     'Content-Type': 'application/json',
   },
