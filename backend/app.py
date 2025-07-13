@@ -34,13 +34,13 @@ basedir = os.path.abspath(os.path.dirname(__file__))
 app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///' + os.path.join(basedir, 'knowledge_map_mvp.db') + '?timeout=15'
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 # ★★★ 重要: 本番環境では、必ず強固でランダムな秘密鍵に変更してください ★★★
+app.config['SECRET_KEY'] = os.getenv("SECRET_KEY")#'your-super-secret-and-random-key-change-me'
 frontend_url = os.getenv('FRONTEND_URL', 'http://localhost:5173')
 CORS(app, 
      resources={r"/api/*": {"origins": frontend_url}}, 
      supports_credentials=True,
      allow_headers=["Content-Type", "Authorization"]
 )
-
 # ログ設定
 logging.basicConfig(level=logging.INFO)
 app.config['ADMIN_USERNAME'] = 'admin' 
