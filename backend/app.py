@@ -48,7 +48,7 @@ app.config['ADMIN_USERNAME'] = 'admin'
 # OpenAI APIキーの設定
 
 
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY","YOUR_OPENAI_API_KEY")
 
 if not OPENAI_API_KEY:
     app.logger.warning("警告: OpenAI APIキーが環境変数に設定されていません。")
