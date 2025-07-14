@@ -440,7 +440,7 @@ def generate_map_for_memo(memo_id):
         app.logger.error(f"Error generating map for memo {memo_id}: {e}", exc_info=True)
         return jsonify({"message": f"Error generating map: {str(e)}"}), 500
 
-DATA_DIR = os.environ.get('RENDER_DISK_MOUNT_PATH', '.') 
+DATA_DIR = os.environ.get('RENDER_DISK_MOUNT_PATH', '/var/data') 
 DB_PATH = os.path.join(DATA_DIR, 'knowledge_map_mvp.db')
 # ★★★ 新規追加: データベースファイルをダウンロードするためのAPI ★★★
 @app.route('/api/admin/download_db', methods=['GET'])
