@@ -442,22 +442,40 @@ def generate_map_for_memo(memo_id):
 
 DATA_DIR = os.environ.get('RENDER_DISK_MOUNT_PATH', '/var/data') 
 DB_PATH = os.path.join(DATA_DIR, 'knowledge_map_mvp.db')
-# ★★★ 新規追加: データベースファイルをダウンロードするためのAPI ★★★
+DB_FILENAME = 'knowledge_map_mvp.db'
+
 @app.route('/api/admin/download_db', methods=['GET'])
 @admin_required
 def download_database():
     """管理者向けにSQLiteデータベースファイルをダウンロードさせる"""
-    try:
-        app.logger.info(f"Database download requested by admin. Serving from directory: {DATA_DIR}")
-        # send_from_directory を使って安全にファイルを送信
-        return send_from_directory(DATA_DIR, 'knowledge_map_mvp.db', as_attachment=True)
-    except FileNotFoundError:
-        app.logger.error(f"Database file not found at {DB_PATH} for download.")
-        return jsonify({"message": "Database file not found."}), 404
-    except Exception as e:
-        app.logger.error(f"Error during database download: {e}", exc_info=True)
-        return jsonify({"message": "An error occurred while downloading the database."}), 500
+    app.logger.info("--- Database download request received ---")
+    app.logger.info(f"Attempting to serve file from directory: '{DATA_DIR}'")
+    app.logger.info(f"Looking for filename: '{DB_FILENAME}'")
+    app.logger.info(f"Full expected path to DB file: '{DB_PATH}'")
 
+    # ★★★ デバッグ機能: ファイルが存在するかどうかをチェック ★★★
+    if not os.path.exists(DB_PATH):
+        app.logger.error(f"DATABASE FILE NOT FOUND at the specified path: {DB_PATH}")
+        # ディレクトリの内容をリストアップして、何があるか確認する
+        try:
+            dir_contents = os.listdir(DATA_DIR)
+            app.logger.info(f"Contents of directory '{DATA_DIR}': {dir_contents}")
+        except Exception as e:
+            app.logger.error(f"Could not list contents of directory '{DATA_DIR}': {e}")
+        
+        return jsonify({
+            "message": f"Server Error: Database file not found.",
+            "details": f"The file '{DB_FILENAME}' was not found in the directory '{DATA_DIR}'."
+        }), 404
+    
+    app.logger.info(f"Database file found at '{DB_PATH}'. Proceeding with download.")
+
+    try:
+        # send_from_directory を使って安全にファイルを送信
+        return send_from_directory(DATA_DIR, DB_FILENAME, as_attachment=True)
+    except Exception as e:
+        app.logger.error(f"Error during send_from_directory: {e}", exc_info=True)
+        return jsonify({"message": "An error occurred while preparing the file for download."}), 500
 
 @app.route('/api/nodes/<path:node_label>/suggest_related', methods=['GET'])
 @token_required
