@@ -3,7 +3,7 @@ import os
 import json
 import logging
 from datetime import datetime, timedelta, timezone
-from flask import Flask, request, jsonify, g, make_response
+from flask import Flask, request, jsonify, g, make_response,send_from_directory
 from flask_sqlalchemy import SQLAlchemy
 from flask_cors import CORS
 import openai
@@ -439,6 +439,25 @@ def generate_map_for_memo(memo_id):
         db.session.rollback()
         app.logger.error(f"Error generating map for memo {memo_id}: {e}", exc_info=True)
         return jsonify({"message": f"Error generating map: {str(e)}"}), 500
+
+DATA_DIR = os.environ.get('RENDER_DISK_MOUNT_PATH', '.') 
+DB_PATH = os.path.join(DATA_DIR, 'knowledge_map_mvp.db')
+# ★★★ 新規追加: データベースファイルをダウンロードするためのAPI ★★★
+@app.route('/api/admin/download_db', methods=['GET'])
+@admin_required
+def download_database():
+    """管理者向けにSQLiteデータベースファイルをダウンロードさせる"""
+    try:
+        app.logger.info(f"Database download requested by admin. Serving from directory: {DATA_DIR}")
+        # send_from_directory を使って安全にファイルを送信
+        return send_from_directory(DATA_DIR, 'knowledge_map_mvp.db', as_attachment=True)
+    except FileNotFoundError:
+        app.logger.error(f"Database file not found at {DB_PATH} for download.")
+        return jsonify({"message": "Database file not found."}), 404
+    except Exception as e:
+        app.logger.error(f"Error during database download: {e}", exc_info=True)
+        return jsonify({"message": "An error occurred while downloading the database."}), 500
+
 
 @app.route('/api/nodes/<path:node_label>/suggest_related', methods=['GET'])
 @token_required
