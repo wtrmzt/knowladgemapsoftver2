@@ -30,8 +30,10 @@ CORS(app,
 )
 # SQLAlchemy（データベース）の設定
 # データベースファイルの絶対パスを指定し、環境によるエラーを防ぎます。
-basedir = os.path.abspath(os.path.dirname(__file__))
-app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///' + os.path.join(basedir, 'knowledge_map_mvp.db') + '?timeout=15'
+#basedir = os.path.abspath(os.path.dirname(__file__))
+#app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///' + os.path.join(basedir, 'knowledge_map_mvp.db') + '?timeout=15'
+db_path = os.path.join('/var/data', 'knowledge_map_mvp.db') 
+app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///' + db_path 
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 # ★★★ 重要: 本番環境では、必ず強固でランダムな秘密鍵に変更してください ★★★
 app.config['SECRET_KEY'] = os.getenv("SECRET_KEY")#'your-super-secret-and-random-key-change-me'
@@ -49,7 +51,7 @@ app.config['ADMIN_USERNAME'] = 'admin'
 
 
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
-
+print(f"OpenAI API Key: {OPENAI_API_KEY}")  # デバッグ用にAPIキーを出力（本番では削除すること）
 if not OPENAI_API_KEY:
     app.logger.warning("警告: OpenAI APIキーが環境変数に設定されていません。")
 else:
