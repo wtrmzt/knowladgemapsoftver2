@@ -23,7 +23,7 @@ function AdminPage() {
         const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:5001';
 
         try {
-            const response = await fetch(`${apiUrl}/api/admin/download_db`, {
+            const response = await fetch(`${apiUrl}/admin/download_db`, {
                 headers: {
                     'Authorization': `Bearer ${token}`
                 }
