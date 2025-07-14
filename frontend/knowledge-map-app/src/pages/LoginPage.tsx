@@ -30,9 +30,14 @@ function LoginPage({ onLoginSuccess }: LoginPageProps) {
       return;
     }
     setIsLoading(true);
+
+
+
+
     try {
       // 修正したauthServiceのlogin関数を呼び出す
       const appToken = await authService.login(username);
+        localStorage.setItem('jwt_token', appToken);
       if (appToken) {
         onLoginSuccess();
         navigate('/dashboard');
