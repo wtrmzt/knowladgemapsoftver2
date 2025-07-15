@@ -32,20 +32,29 @@ CORS(app,
 # データベースファイルの絶対パスを指定し、環境によるエラーを防ぎます。
 #basedir = os.path.abspath(os.path.dirname(__file__))
 #app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///' + os.path.join(basedir, 'knowledge_map_mvp.db') + '?timeout=15'
-db_path = os.path.join('/var/data', 'knowledge_map_mvp.db') 
-app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///' + db_path 
+basedir = os.path.abspath(os.path.dirname(__file__))
+app.config['SECRET_KEY'] = os.getenv('SECRET_KEY', 'a-default-fallback-secret-key')
+
+database_url = os.getenv('DATABASE_URL')
+if database_url:
+    # RenderのPostgreSQLは 'postgres://' で始まるため、'postgresql://' に置換する
+    if database_url.startswith("postgres://"):
+        database_url = database_url.replace("postgres://", "postgresql://", 1)
+    app.config['SQLALCHEMY_DATABASE_URI'] = database_url
+else:
+    app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///' + os.path.join(basedir, 'knowledge_map_mvp.db')
+
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
-# ★★★ 重要: 本番環境では、必ず強固でランダムな秘密鍵に変更してください ★★★
-app.config['SECRET_KEY'] = os.getenv("SECRET_KEY")#'your-super-secret-and-random-key-change-me'
+app.config['ADMIN_USERNAME'] = os.getenv('ADMIN_USERNAME', 'admin')
+
 frontend_url = os.getenv('FRONTEND_URL', 'http://localhost:5173')
 CORS(app, 
      resources={r"/api/*": {"origins": frontend_url}}, 
      supports_credentials=True,
      allow_headers=["Content-Type", "Authorization"]
 )
-# ログ設定
-logging.basicConfig(level=logging.INFO)
-app.config['ADMIN_USERNAME'] = 'admin' 
+
+db = SQLAlchemy(app)
 
 # OpenAI APIキーの設定
 

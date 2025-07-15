@@ -8,3 +8,5 @@ openai
 requests
 spacy
 numpy
+gunicorn
+psycopg2-binary
