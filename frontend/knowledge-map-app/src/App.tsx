@@ -61,7 +61,7 @@ function App() {
         <Navbar isAuthenticated={isAuthenticated} isAdmin={isAdmin} onLogout={handleLogout} />
         {/* ★★★ 重要な修正: mainにflex-grow、min-h-0を追加し、paddingを調整 ★★★ */}
         <main className="flex-grow min-h-0 w-full">
-          <div className="container mx-auto p-4 h-full flex flex-col">
+          <div className="container p-4 h-full flex flex-col">
             <Routes>
               {/* ログインページ: 認証済みなら権限に応じてリダイレクト */}
               <Route 
