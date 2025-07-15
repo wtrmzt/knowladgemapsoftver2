@@ -8,6 +8,7 @@ import AdminPage from './pages/AdminPage';
 import { authService } from './services/authService';
 import { Toaster } from "@/components/ui/toaster";
 import { Shield } from 'lucide-react';
+import ConsentPage from './pages/ConsentPage'; // ★★★ 同意書ページをインポート ★★★
 
 const Navbar: React.FC<{ isAuthenticated: boolean; isAdmin: boolean; onLogout: () => void }> = ({ isAuthenticated, isAdmin, onLogout }) => {
   if (!isAuthenticated) return null;
@@ -60,17 +61,19 @@ function App() {
         <Navbar isAuthenticated={isAuthenticated} isAdmin={isAdmin} onLogout={handleLogout} />
         {/* ★★★ 重要な修正: mainにflex-grow、min-h-0を追加し、paddingを調整 ★★★ */}
         <main className="flex-grow min-h-0 w-full">
-          <div className="container p-4 h-full w-full flex flex-col">
+          <div className="container mx-auto p-4 h-full flex flex-col">
             <Routes>
               {/* ログインページ: 認証済みなら権限に応じてリダイレクト */}
               <Route 
                 path="/login" 
                 element={!isAuthenticated ? <LoginPage onLoginSuccess={handleLoginSuccess} /> : <Navigate to={isAdmin ? "/admin" : "/dashboard"} />} 
               />
-              
+              {/* 同意書ページ: 認証済みなら表示、未認証ならログインページへリダイレクト */}
+              <Route path="/consent" element={<ConsentPage />} /> 
+
               {/* ユーザー用ダッシュボード: 管理者はAdminページへリダイレクト */}
               <Route 
-                path="/dashboard"
+                path="/dashboard" 
                 element={
                   !isAuthenticated ? <Navigate to="/login" /> : 
                   isAdmin ? <Navigate to="/admin" /> : 

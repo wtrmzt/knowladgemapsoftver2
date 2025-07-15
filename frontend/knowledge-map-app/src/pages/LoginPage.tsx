@@ -1,11 +1,11 @@
 // src/pages/LoginPage.tsx
 import React, { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, Link } from 'react-router-dom'; // ★★★ Linkをインポート ★★★
 import { authService } from '../services/authService';
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useToast } from "@/hooks/use-toast";
-import { LogIn, User as UserIcon } from 'lucide-react';
+import { LogIn, User as UserIcon, Loader2 } from 'lucide-react';
 import { Label } from '@/components/ui/label';
 
 interface LoginPageProps {
@@ -15,11 +15,9 @@ interface LoginPageProps {
 function LoginPage({ onLoginSuccess }: LoginPageProps) {
   const navigate = useNavigate();
   const { toast } = useToast();
-  // ★★★ 修正: ユーザーIDを管理するためのStateを追加 ★★★
   const [username, setUsername] = useState('');
   const [isLoading, setIsLoading] = useState(false);
 
-  // ★★★ 修正: IDとパスワードでログインするハンドラを実装 ★★★
   const handleLogin = async () => {
     if (!username.trim()) {
       toast({
@@ -30,20 +28,14 @@ function LoginPage({ onLoginSuccess }: LoginPageProps) {
       return;
     }
     setIsLoading(true);
-
-
-
-
     try {
-      // 修正したauthServiceのlogin関数を呼び出す
       const appToken = await authService.login(username);
-        localStorage.setItem('jwt_token', appToken);
+      localStorage.setItem('jwt_token', appToken);
       if (appToken) {
         onLoginSuccess();
         navigate('/dashboard');
         toast({ title: "ログイン成功", description: `ようこそ、${username}さん！` });
       } else {
-        // このケースは通常発生しないが、念のため
         throw new Error("アプリケーショントークンが取得できませんでした。");
       }
     } catch (error: any) {
@@ -62,6 +54,9 @@ function LoginPage({ onLoginSuccess }: LoginPageProps) {
       handleLogin();
     }
   };
+
+  // ★★★ 同意書ページのパスを定義 ★★★
+  const consentPagePath = "/consent"; // ここは実際の同意書ページのパスに合わせてください
 
   return (
     <div className="flex flex-col items-center justify-center min-h-[calc(100vh-12rem)]">
@@ -82,7 +77,7 @@ function LoginPage({ onLoginSuccess }: LoginPageProps) {
                         value={username}
                         onChange={(e) => setUsername(e.target.value)}
                         onKeyPress={handleKeyPress}
-                        className="pl-10" // アイコンの分のスペースを確保
+                        className="pl-10"
                         disabled={isLoading}
                     />
                  </div>
@@ -93,15 +88,20 @@ function LoginPage({ onLoginSuccess }: LoginPageProps) {
           {isLoading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
           ログイン
         </Button>
+
+        {/* ★★★ 同意書へのリンクを追加 ★★★ */}
+        <div className="mt-6 text-sm">
+            <p className="text-muted-foreground">
+                ログインすることで、
+                <Link to={consentPagePath} className="underline text-primary hover:text-primary/80 mx-1">
+                    実験への同意書
+                </Link>
+                に同意したものとみなされます。
+            </p>
+        </div>
       </div>
     </div>
   );
 }
-
-// ローディングインジケーター用のコンポーネント
-const Loader2 = (props: React.SVGProps<SVGSVGElement>) => (
-    <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...props}><path d="M21 12a9 9 0 1 1-6.219-8.56"/></svg>
-);
-
 
 export default LoginPage;
