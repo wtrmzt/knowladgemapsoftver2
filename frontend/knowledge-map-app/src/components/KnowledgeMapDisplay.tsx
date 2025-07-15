@@ -307,7 +307,7 @@ const TemporalMapSheetContent: React.FC<{
     return (
         <Sheet open={isOpen} onOpenChange={onOpenChange}>
             <SheetContent className="w-[90vw] sm:max-w-3xl">
-                <SheetHeader><SheetTitle>「{baseNode?.data.label}」の時系列的把握</SheetTitle></SheetHeader>
+                <SheetHeader><SheetTitle>「{baseNode?.data.label}」の科目の関連</SheetTitle></SheetHeader>
                 <div className="h-[calc(100vh-160px)] my-4 border rounded-md">
                     {isLoading ? (
                         <div className="flex justify-center items-center h-full">
@@ -482,7 +482,7 @@ function KnowledgeMapDisplay(props: KnowledgeMapDisplayProps) {
                             </div>
                             <SheetFooter className="flex-col sm:flex-col sm:space-x-0 space-y-2">
                                 <Button variant="outline" onClick={handleFetchSuggestions}><Search className="h-4 w-4 mr-2" />関連情報を検索</Button>
-                                <Button variant="outline" onClick={handleFetchTemporalNodes}><History className="h-4 w-4 mr-2" />時系列的把握</Button>
+                                <Button variant="outline" onClick={handleFetchTemporalNodes}><History className="h-4 w-4 mr-2" />電通大の科目と接続</Button>
                             </SheetFooter>
                         </div>
                     )}

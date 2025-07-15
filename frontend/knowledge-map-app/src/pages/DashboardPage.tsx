@@ -217,9 +217,9 @@ function DashboardPage() {
       {/* --- 背景デザイン要素 (マップの上にオーバーレイ) --- */}
       {/* ★★★ pointer-events-noneで、下のマップへのクリックを透過させる ★★★ */}
       <div className="absolute inset-0 pointer-events-none z-10">
-        <div className="absolute top-8 left-8 right-8 h-12 border-t-2 border-b-2 border-blue-400/20"></div>
+        {/*<div className="absolute top-8 left-8 right-8 h-12 border-t-2 border-b-2 border-blue-400/20"></div>
         <div className="absolute bottom-8 left-8 right-8 h-8 border-b-2 border-blue-400/20"></div>
-        <div className="absolute top-8 left-8 bottom-8 w-8 border-l-2 border-r-2 border-blue-400/20"></div>
+        <div className="absolute top-8 left-8 bottom-8 w-8 border-l-2 border-r-2 border-blue-400/20"></div>*/}
         <div className="absolute top-8 right-8 bottom-8 w-8 border-l-2 border-r-2 border-blue-400/20"></div>
       </div>
 

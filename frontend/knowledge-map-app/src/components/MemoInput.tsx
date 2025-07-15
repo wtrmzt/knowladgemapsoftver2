@@ -2,7 +2,8 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Textarea } from "./ui/textarea";
 import { Button } from "./ui/button";
-import { Save, Palette } from 'lucide-react';
+//import { Save, Palette } from 'lucide-react';
+import { Save } from 'lucide-react';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -68,10 +69,10 @@ function MemoInput({ initialText, onSave, memokey }: MemoInputProps) {
       <div className="mb-2 flex items-center gap-2 flex-shrink-0"> {/* flex-shrink-0 を追加 */}
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
-            <Button variant="outline" size="sm" className="bg-gray-700 border-gray-600 hover:bg-gray-600 text-white">
+            {/*<Button variant="outline" size="sm" className="bg-gray-700 border-gray-600 hover:bg-gray-600 text-white">
               <Palette className="h-4 w-4 mr-2" />
               文字色
-            </Button>
+            </Button>*/}
           </DropdownMenuTrigger>
           <DropdownMenuContent className="bg-gray-800 border-gray-700 text-white">
             {availableColors.map((color) => (
@@ -114,7 +115,7 @@ function MemoInput({ initialText, onSave, memokey }: MemoInputProps) {
       {/* 保存ボタンは現状のままでOKです */}
       <Button onClick={handleSaveClick} className="mt-4 w-full flex-shrink-0 bg-green-600 hover:bg-green-500">
         <Save className="mr-2 h-4 w-4" />
-        メモを保存
+        メモを保存/マップの新規作成
       </Button>
     </div>
   );
