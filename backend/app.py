@@ -54,13 +54,12 @@ CORS(app,
      allow_headers=["Content-Type", "Authorization"]
 )
 
-db = SQLAlchemy(app)
 
 # OpenAI APIキーの設定
 
 
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
-print(f"OpenAI API Key: {OPENAI_API_KEY}")  # デバッグ用にAPIキーを出力（本番では削除すること）
+#print(f"OpenAI API Key: {OPENAI_API_KEY}")  # デバッグ用にAPIキーを出力（本番では削除すること）
 if not OPENAI_API_KEY:
     app.logger.warning("警告: OpenAI APIキーが環境変数に設定されていません。")
 else:
