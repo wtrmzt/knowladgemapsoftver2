@@ -247,7 +247,7 @@ function DashboardPage() {
       <aside className={`absolute top-0 left-0 h-full w-[400px] bg-gray-900/80 backdrop-blur-md border-r border-blue-400/20 shadow-2xl transition-transform duration-500 ease-in-out z-30 ${isMemoPanelOpen ? 'translate-x-0' : '-translate-x-full'}`}>
         <div className="p-6 h-full flex flex-col">
           <div className="flex justify-between items-center mb-4">
-            <h2 className="text-xl font-bold flex items-center"><Brain className="mr-2"/>学習メモ</h2>
+            <h2 className="text-xl font-bold flex items-center"><Brain className="mr-2"/>ActivityReportの下書き</h2>
             <Button onClick={() => setIsMemoPanelOpen(false)} variant="ghost" size="icon"><X className="w-6 h-6" /></Button>
           </div>
           <div className="flex-grow flex flex-col min-h-0">

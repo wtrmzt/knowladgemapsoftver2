@@ -34,7 +34,7 @@ const ConsentPage: React.FC = () => {
             収集する主なデータは以下の通りです。
           </p>
           <ul className="list-disc list-inside mb-2 text-sm space-y-1 pl-4">
-            <li>ユーザー登録情報（Googleアカウントに基づくメールアドレス）</li>
+            <li>匿名化されたユーザー登録情報</li>
             <li>メモの内容（テキスト、リッチテキスト情報）</li>
             <li>生成された知識マップのデータ（ノード、エッジ、構造）</li>
             <li>ツールの操作ログ（ボタンクリック、ページ遷移など）</li>
@@ -84,8 +84,8 @@ const ConsentPage: React.FC = () => {
         <section className="mb-6">
           <h2 className="text-xl font-semibold mb-3">7. 同意の確認</h2>
           <p className="mb-2 text-sm leading-relaxed">
-            上記の説明を理解し、本研究への参加に同意いただける場合は、ログインページのチェックボックスにチェックを入れてログイン操作を進めてください。
-            チェックボックスへのチェックをもって、本説明書の内容に同意したものとみなします。
+            上記の説明を理解し、本研究への参加に同意いただける場合は、ログイン操作を進めてください。
+            本システムへのログインをもって、本説明書の内容に同意したものとみなします。
           </p>
         </section>
 
