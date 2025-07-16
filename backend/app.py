@@ -35,14 +35,22 @@ CORS(app,
 basedir = os.path.abspath(os.path.dirname(__file__))
 app.config['SECRET_KEY'] = os.getenv('SECRET_KEY', 'a-default-fallback-secret-key')
 
+# --- データベース接続設定 ---
 database_url = os.getenv('DATABASE_URL')
 if database_url:
-    # RenderのPostgreSQLは 'postgres://' で始まるため、'postgresql://' に置換する
+    # RenderのPostgreSQLは 'postgres://' で始まるため、'postgresql://' に置換
     if database_url.startswith("postgres://"):
         database_url = database_url.replace("postgres://", "postgresql://", 1)
+    
+    # ★★★ ここが重要な修正点 ★★★
+    # SSLモードが既に追加されていない場合、必須にするオプションを追加
+    if '?sslmode' not in database_url:
+        database_url += "?sslmode=require"
+        
     app.config['SQLALCHEMY_DATABASE_URI'] = database_url
 else:
-    app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///' + os.path.join(basedir, 'knowledge_map_mvp.db')
+    # ローカル開発用のフォールバック
+    app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///' + os.path.join(basedir, 'knowledge_map_mvp.db') + '?timeout=15'
 
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 app.config['ADMIN_USERNAME'] = os.getenv('ADMIN_USERNAME', 'admin')
