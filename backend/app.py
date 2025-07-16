@@ -38,19 +38,20 @@ app.config['SECRET_KEY'] = os.getenv('SECRET_KEY', 'a-default-fallback-secret-ke
 # --- データベース接続設定 ---
 database_url = os.getenv('DATABASE_URL')
 if database_url:
-    # RenderのPostgreSQLは 'postgres://' で始まるため、'postgresql://' に置換
     if database_url.startswith("postgres://"):
         database_url = database_url.replace("postgres://", "postgresql://", 1)
     
-    # ★★★ ここが重要な修正点 ★★★
-    # SSLモードが既に追加されていない場合、必須にするオプションを追加
-    if '?sslmode' not in database_url:
-        database_url += "?sslmode=require"
-        
     app.config['SQLALCHEMY_DATABASE_URI'] = database_url
+    # ★★★ ここが重要な修正点 ★★★
+    # 接続プールに関する設定を追加し、接続の安定性を向上させます。
+    app.config['SQLALCHEMY_ENGINE_OPTIONS'] = {
+        'pool_pre_ping': True, # コネクションを使用する前に生存確認を行う
+        'pool_recycle': 299,   # 299秒ごとにコネクションをリサイクルする
+    }
 else:
     # ローカル開発用のフォールバック
-    app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///' + os.path.join(basedir, 'knowledge_map_mvp.db') + '?timeout=15'
+    app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///' + os.path.join(basedir, 'knowledge_map_mvp.db')
+
 
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 app.config['ADMIN_USERNAME'] = os.getenv('ADMIN_USERNAME', 'admin')
