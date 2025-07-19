@@ -29,31 +29,40 @@ CORS(app,
      supports_credentials=True,
      allow_headers=["Content-Type", "Authorization"]
 )
-# SQLAlchemy（データベース）の設定
-# データベースファイルの絶対パスを指定し、環境によるエラーを防ぎます。
-#basedir = os.path.abspath(os.path.dirname(__file__))
-#app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///' + os.path.join(basedir, 'knowledge_map_mvp.db') + '?timeout=15'
+
+
+# 1. データベース設定部分の修正
 basedir = os.path.abspath(os.path.dirname(__file__))
 app.config['SECRET_KEY'] = os.getenv('SECRET_KEY', 'a-default-fallback-secret-key')
 
 # --- データベース接続設定 ---
 database_url = os.getenv('DATABASE_URL')
 if database_url:
+    # RenderのPostgreSQLでは postgres:// が使われることがあるため、postgresql:// に変換
     if database_url.startswith("postgres://"):
         database_url = database_url.replace("postgres://", "postgresql://", 1)
     
     app.config['SQLALCHEMY_DATABASE_URI'] = database_url
-    # ★★★ ここが重要な修正点 ★★★
-    # 接続プールに関する設定を追加し、接続の安定性を向上させます。
+    # PostgreSQL用の接続プール設定
     app.config['SQLALCHEMY_ENGINE_OPTIONS'] = {
-        'pool_pre_ping': True, # コネクションを使用する前に生存確認を行う
-        'pool_recycle': 299,   # 299秒ごとにコネクションをリサイクルする
+        'pool_pre_ping': True,    # 接続前の生存確認
+        'pool_recycle': 299,      # 5分でコネクションをリサイクル
+        'pool_timeout': 20,       # 接続取得のタイムアウト
+        'pool_size': 10,          # 接続プールサイズ
+        'max_overflow': 20,       # 最大オーバーフロー接続数
     }
 else:
-    # ローカル開発用のフォールバック
-    app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///' + os.path.join(basedir, 'knowledge_map_mvp.db')
-
-
+    # ローカル開発用のフォールバック（SQLiteまたはPostgreSQL）
+    local_postgres_url = os.getenv('LOCAL_DATABASE_URL')
+    if local_postgres_url:
+        app.config['SQLALCHEMY_DATABASE_URI'] = local_postgres_url
+        app.config['SQLALCHEMY_ENGINE_OPTIONS'] = {
+            'pool_pre_ping': True,
+            'pool_recycle': 299,
+        }
+    else:
+        # 最終的なフォールバック（SQLite）
+        app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///' + os.path.join(basedir, 'knowledge_map_mvp.db')
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 app.config['ADMIN_USERNAME'] = os.getenv('ADMIN_USERNAME', 'admin')
 
@@ -173,42 +182,51 @@ def login():
 # =============================================================================
 # 2. Database Models
 # =============================================================================
+from sqlalchemy.dialects.postgresql import UUID
+import uuid
 
 class User(db.Model):
+    __tablename__ = 'users'  # テーブル名を明示的に指定
+    
     id = db.Column(db.Integer, primary_key=True)
-    username = db.Column(db.String(80), unique=True, nullable=False)
+    username = db.Column(db.String(80), unique=True, nullable=False, index=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
     memos = db.relationship('Memo', backref='author', lazy=True, cascade="all, delete-orphan")
     logs = db.relationship('UserActivityLog', backref='user', lazy=True, cascade="all, delete-orphan")
 
 class Memo(db.Model):
+    __tablename__ = 'memos'
+    
     id = db.Column(db.Integer, primary_key=True)
-    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False, index=True)
     content = db.Column(db.Text, nullable=False)
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
-    # ★★★ 修正点: 関連名を 'history_entries' に変更し、一対多の関係を明確化 ★★★
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False, index=True)
     history_entries = db.relationship('MapHistory', backref='memo', lazy=True, cascade="all, delete-orphan")
 
-# ★★★ 修正点: KnowledgeMapテーブルをMapHistoryテーブルに変更 ★★★
 class MapHistory(db.Model):
-    """マップの各バージョンの状態を記録するテーブル"""
-    id = db.Column(db.Integer, primary_key=True) # 更新ごとに増えるID
-    memo_id = db.Column(db.Integer, db.ForeignKey('memo.id'), nullable=False) # どのメモに紐づくか
-    map_data = db.Column(db.JSON, nullable=False) # その時点でのマップデータ
-    created_at = db.Column(db.DateTime, default=datetime.utcnow) # 記録された日時
+    __tablename__ = 'map_history'
+    
+    id = db.Column(db.Integer, primary_key=True)
+    memo_id = db.Column(db.Integer, db.ForeignKey('memos.id'), nullable=False, index=True)
+    map_data = db.Column(db.JSON, nullable=False)  # PostgreSQLのJSONB型が自動選択される
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False, index=True)
 
 class KnowledgeMap(db.Model):
+    __tablename__ = 'knowledge_maps'
+    
     id = db.Column(db.Integer, primary_key=True)
-    memo_id = db.Column(db.Integer, db.ForeignKey('memo.id'), nullable=False, unique=True)
+    memo_id = db.Column(db.Integer, db.ForeignKey('memos.id'), nullable=False, unique=True)
     map_data = db.Column(db.JSON, nullable=False)
-    generated_at = db.Column(db.DateTime, default=datetime.utcnow)
+    generated_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
 
 class UserActivityLog(db.Model):
+    __tablename__ = 'user_activity_logs'
+    
     id = db.Column(db.Integer, primary_key=True)
-    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
-    activity_type = db.Column(db.String(100), nullable=False)
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False, index=True)
+    activity_type = db.Column(db.String(100), nullable=False, index=True)
     details = db.Column(db.JSON)
-    timestamp = db.Column(db.DateTime, default=datetime.utcnow)
-
+    timestamp = db.Column(db.DateTime, default=datetime.utcnow, nullable=False, index=True)
 
 # =============================================================================
 # 3. Helper Functions
@@ -242,6 +260,42 @@ def _build_cors_preflight_response():
 # =============================================================================
 # 4. API Endpoints
 # =============================================================================
+
+
+# 3. データベース初期化とマイグレーション用の関数
+def init_database():
+    """データベースの初期化"""
+    try:
+        # テーブルの作成
+        db.create_all()
+        app.logger.info("Database tables created successfully.")
+        
+        # インデックスの確認・作成
+        with db.engine.connect() as conn:
+            # 必要に応じて追加のインデックスを作成
+            try:
+                conn.execute(db.text("CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_memos_user_created ON memos(user_id, created_at DESC)"))
+                conn.execute(db.text("CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_map_history_memo_created ON map_history(memo_id, created_at DESC)"))
+                conn.commit()
+                app.logger.info("Additional indexes created successfully.")
+            except Exception as e:
+                app.logger.warning(f"Could not create additional indexes: {e}")
+                
+    except Exception as e:
+        app.logger.error(f"Database initialization failed: {e}")
+        raise
+
+# 4. データベース接続の健全性チェック
+@app.route('/api/health', methods=['GET'])
+def health_check():
+    """データベース接続の健全性チェック"""
+    try:
+        # シンプルなクエリでデータベース接続をテスト
+        db.session.execute(db.text('SELECT 1'))
+        return jsonify({"status": "healthy", "database": "connected"}), 200
+    except Exception as e:
+        app.logger.error(f"Health check failed: {e}")
+        return jsonify({"status": "unhealthy", "error": str(e)}), 500
 
 # ★★★ 修正点: GETとPUTを一つの関数に統合 ★★★
 @app.route('/api/maps/<int:memo_id>', methods=['GET', 'PUT'])
@@ -457,43 +511,6 @@ def generate_map_for_memo(memo_id):
         db.session.rollback()
         app.logger.error(f"Error generating map for memo {memo_id}: {e}", exc_info=True)
         return jsonify({"message": f"Error generating map: {str(e)}"}), 500
-
-DATA_DIR = os.environ.get('RENDER_DISK_MOUNT_PATH', '/var/data') 
-DB_PATH = os.path.join(DATA_DIR, 'knowledge_map_mvp.db')
-DB_FILENAME = 'knowledge_map_mvp.db'
-
-@app.route('/api/admin/download_db', methods=['GET'])
-@admin_required
-def download_database():
-    """管理者向けにSQLiteデータベースファイルをダウンロードさせる"""
-    app.logger.info("--- Database download request received ---")
-    app.logger.info(f"Attempting to serve file from directory: '{DATA_DIR}'")
-    app.logger.info(f"Looking for filename: '{DB_FILENAME}'")
-    app.logger.info(f"Full expected path to DB file: '{DB_PATH}'")
-
-    # ★★★ デバッグ機能: ファイルが存在するかどうかをチェック ★★★
-    if not os.path.exists(DB_PATH):
-        app.logger.error(f"DATABASE FILE NOT FOUND at the specified path: {DB_PATH}")
-        # ディレクトリの内容をリストアップして、何があるか確認する
-        try:
-            dir_contents = os.listdir(DATA_DIR)
-            app.logger.info(f"Contents of directory '{DATA_DIR}': {dir_contents}")
-        except Exception as e:
-            app.logger.error(f"Could not list contents of directory '{DATA_DIR}': {e}")
-        
-        return jsonify({
-            "message": f"Server Error: Database file not found.",
-            "details": f"The file '{DB_FILENAME}' was not found in the directory '{DATA_DIR}'."
-        }), 404
-    
-    app.logger.info(f"Database file found at '{DB_PATH}'. Proceeding with download.")
-
-    try:
-        # send_from_directory を使って安全にファイルを送信
-        return send_from_directory(DATA_DIR, DB_FILENAME, as_attachment=True)
-    except Exception as e:
-        app.logger.error(f"Error during send_from_directory: {e}", exc_info=True)
-        return jsonify({"message": "An error occurred while preparing the file for download."}), 500
 
 @app.route('/api/nodes/<path:node_label>/suggest_related', methods=['GET'])
 @token_required
@@ -726,6 +743,44 @@ def rollback_map_history(memo_id):
         db.session.rollback()
         return jsonify({"message": "Failed to perform rollback"}), 500
     
+
+# 5. 管理者用データベースバックアップAPI（PostgreSQL版）
+@app.route('/api/admin/backup_db', methods=['GET'])
+@admin_required
+def backup_database():
+    """PostgreSQLデータベースのSQL dump を作成"""
+    try:
+        import subprocess
+        import tempfile
+        
+        database_url = os.getenv('DATABASE_URL')
+        if not database_url:
+            return jsonify({"message": "Database URL not configured"}), 500
+        
+        # 一時ファイルを作成してSQL dumpを保存
+        with tempfile.NamedTemporaryFile(mode='w+b', suffix='.sql', delete=False) as tmp_file:
+            # pg_dumpコマンドを実行
+            result = subprocess.run([
+                'pg_dump', database_url
+            ], stdout=tmp_file, stderr=subprocess.PIPE, text=True)
+            
+            if result.returncode != 0:
+                app.logger.error(f"pg_dump failed: {result.stderr}")
+                return jsonify({"message": "Backup failed"}), 500
+            
+            tmp_file.seek(0)
+            return send_from_directory(
+                os.path.dirname(tmp_file.name),
+                os.path.basename(tmp_file.name),
+                as_attachment=True,
+                download_name=f"knowledge_map_backup_{datetime.now().strftime('%Y%m%d_%H%M%S')}.sql"
+            )
+            
+    except Exception as e:
+        app.logger.error(f"Backup error: {e}")
+        return jsonify({"message": "Backup operation failed"}), 500
+
+
 
 # ★★★ 新規追加: 全ユーザーの最新マップを統合して取得するAPI ★★★
 @app.route('/api/admin/combined_map', methods=['GET'])
