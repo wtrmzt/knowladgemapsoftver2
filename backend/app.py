@@ -19,6 +19,7 @@ from sqlalchemy import func, distinct, and_
 
 # Flaskアプリケーションのインスタンスを作成
 app = Flask(__name__)
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 # --- アプリケーションの設定 ---
 # CORS設定 (異なるオリジンからのリクエストを許可)
@@ -613,6 +614,40 @@ def calculate_temporal_related_nodes():
         app.logger.error(f"API Error: Error calculating temporal related nodes for '{input_node_data.get('label')}': {e}", exc_info=True)
         return jsonify({"message": f"時系列関連ノードの算出中に予期せぬエラーが発生しました。"}), 500
 
+@app.route('/api/maps/<int:memo_id>', methods=['PUT'])
+@token_required
+def update_map(memo_id):
+    user_id = g.current_user_id
+    app.logger.info(f"[update_map] Received request for memo_id: {memo_id} from user_id: {user_id}")
+
+    memo = Memo.query.filter_by(id=memo_id).first()
+    if not memo:
+        app.logger.warning(f"[update_map] Memo with id {memo_id} not found.")
+        return jsonify({"message": "Memo not found"}), 404
+    
+    if not g.is_admin and memo.user_id != user_id:
+        app.logger.warning(f"[update_map] Access denied for user {user_id} on memo {memo_id}")
+        return jsonify({"message": "Access denied"}), 403
+
+    new_map_data = request.get_json()
+    if not new_map_data or 'nodes' not in new_map_data or 'edges' not in new_map_data:
+        app.logger.error("[update_map] Invalid map data format received.")
+        return jsonify({"message": "Invalid map data format"}), 400
+
+    try:
+        app.logger.info(f"[update_map] Creating new MapHistory entry for memo_id: {memo_id}")
+        new_history_entry = MapHistory(memo_id=memo_id, map_data=new_map_data)
+        db.session.add(new_history_entry)
+        
+        app.logger.info("[update_map] Committing transaction to the database...")
+        db.session.commit()
+        app.logger.info("[update_map] Commit successful.")
+        
+        return jsonify({"message": "Map history created successfully"}), 200
+    except Exception as e:
+        db.session.rollback()
+        app.logger.error(f"[update_map] Failed to create map history for memo {memo_id}: {e}", exc_info=True)
+        return jsonify({"message": "Failed to create map history"}), 500
 
 # =============================================================================
 # 5. Admin API Endpoints
