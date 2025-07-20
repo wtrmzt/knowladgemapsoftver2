@@ -47,7 +47,6 @@ function AdminPage() {
             document.body.appendChild(link);
             link.click();
 
-
             // 後処理
             link.parentNode?.removeChild(link);
             window.URL.revokeObjectURL(downloadUrl);
