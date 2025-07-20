@@ -63,6 +63,7 @@ else:
     else:
         # 最終的なフォールバック（SQLite）
         app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///' + os.path.join(basedir, 'knowledge_map_mvp.db')
+
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 app.config['ADMIN_USERNAME'] = os.getenv('ADMIN_USERNAME', 'admin')
 
@@ -284,6 +285,92 @@ def init_database():
     except Exception as e:
         app.logger.error(f"Database initialization failed: {e}")
         raise
+
+
+# 方法1: SQLAlchemyを使ったCSVエクスポート（推奨）
+@app.route('/api/admin/export_csv', methods=['GET'])
+@admin_required
+def export_database_csv():
+    """全テーブルをCSV形式でエクスポート"""
+    import io
+    import zipfile
+    from datetime import datetime
+    
+    try:
+        # メモリ上にZIPファイルを作成
+        zip_buffer = io.BytesIO()
+        
+        with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zip_file:
+            
+            # ユーザーテーブル
+            users_data = []
+            users = User.query.all()
+            for user in users:
+                users_data.append({
+                    'id': user.id,
+                    'username': user.username,
+                    'created_at': user.created_at.isoformat()
+                })
+            users_df = pd.DataFrame(users_data)
+            users_csv = users_df.to_csv(index=False)
+            zip_file.writestr('users.csv', users_csv)
+            
+            # メモテーブル
+            memos_data = []
+            memos = Memo.query.all()
+            for memo in memos:
+                memos_data.append({
+                    'id': memo.id,
+                    'user_id': memo.user_id,
+                    'content': memo.content,
+                    'created_at': memo.created_at.isoformat()
+                })
+            memos_df = pd.DataFrame(memos_data)
+            memos_csv = memos_df.to_csv(index=False)
+            zip_file.writestr('memos.csv', memos_csv)
+            
+            # マップ履歴テーブル
+            history_data = []
+            histories = MapHistory.query.all()
+            for history in histories:
+                history_data.append({
+                    'id': history.id,
+                    'memo_id': history.memo_id,
+                    'map_data': json.dumps(history.map_data, ensure_ascii=False),
+                    'created_at': history.created_at.isoformat()
+                })
+            history_df = pd.DataFrame(history_data)
+            history_csv = history_df.to_csv(index=False)
+            zip_file.writestr('map_history.csv', history_csv)
+            
+            # アクティビティログテーブル
+            activity_data = []
+            activities = UserActivityLog.query.all()
+            for activity in activities:
+                activity_data.append({
+                    'id': activity.id,
+                    'user_id': activity.user_id,
+                    'activity_type': activity.activity_type,
+                    'details': json.dumps(activity.details, ensure_ascii=False) if activity.details else '',
+                    'timestamp': activity.timestamp.isoformat()
+                })
+            activity_df = pd.DataFrame(activity_data)
+            activity_csv = activity_df.to_csv(index=False)
+            zip_file.writestr('user_activity_logs.csv', activity_csv)
+        
+        # レスポンス準備
+        zip_buffer.seek(0)
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        
+        response = make_response(zip_buffer.read())
+        response.headers['Content-Type'] = 'application/zip'
+        response.headers['Content-Disposition'] = f'attachment; filename=database_export_{timestamp}.zip'
+        
+        return response
+        
+    except Exception as e:
+        app.logger.error(f"CSV export failed: {e}", exc_info=True)
+        return jsonify({"message": f"Export failed: {str(e)}"}), 500
 
 # 4. データベース接続の健全性チェック
 @app.route('/api/health', methods=['GET'])
@@ -744,41 +831,69 @@ def rollback_map_history(memo_id):
         return jsonify({"message": "Failed to perform rollback"}), 500
     
 
-# 5. 管理者用データベースバックアップAPI（PostgreSQL版）
+# 既存のバックアップ関数の修正版（Render対応）
 @app.route('/api/admin/backup_db', methods=['GET'])
 @admin_required
 def backup_database():
-    """PostgreSQLデータベースのSQL dump を作成"""
+    """SQLAlchemyを使ったバックアップ（Render環境対応）"""
     try:
-        import subprocess
-        import tempfile
+        # SQLAlchemyのメタデータを使ってSQLダンプを生成
+        from sqlalchemy import create_engine, MetaData
+        from sqlalchemy.schema import CreateTable
         
-        database_url = os.getenv('DATABASE_URL')
-        if not database_url:
-            return jsonify({"message": "Database URL not configured"}), 500
+        engine = db.engine
+        metadata = MetaData()
+        metadata.reflect(bind=engine)
         
-        # 一時ファイルを作成してSQL dumpを保存
-        with tempfile.NamedTemporaryFile(mode='w+b', suffix='.sql', delete=False) as tmp_file:
-            # pg_dumpコマンドを実行
-            result = subprocess.run([
-                'pg_dump', database_url
-            ], stdout=tmp_file, stderr=subprocess.PIPE, text=True)
-            
-            if result.returncode != 0:
-                app.logger.error(f"pg_dump failed: {result.stderr}")
-                return jsonify({"message": "Backup failed"}), 500
-            
-            tmp_file.seek(0)
-            return send_from_directory(
-                os.path.dirname(tmp_file.name),
-                os.path.basename(tmp_file.name),
-                as_attachment=True,
-                download_name=f"knowledge_map_backup_{datetime.now().strftime('%Y%m%d_%H%M%S')}.sql"
-            )
-            
+        backup_sql = []
+        backup_sql.append("-- Database backup generated by Knowledge Map App")
+        backup_sql.append(f"-- Generated at: {datetime.now().isoformat()}")
+        backup_sql.append("")
+        
+        # テーブル作成文を生成
+        for table in metadata.sorted_tables:
+            backup_sql.append(f"-- Table: {table.name}")
+            create_stmt = str(CreateTable(table).compile(engine))
+            backup_sql.append(create_stmt + ";")
+            backup_sql.append("")
+        
+        # データのINSERT文を生成
+        with engine.connect() as conn:
+            for table in metadata.sorted_tables:
+                result = conn.execute(table.select())
+                rows = result.fetchall()
+                
+                if rows:
+                    backup_sql.append(f"-- Data for table: {table.name}")
+                    for row in rows:
+                        values = []
+                        for value in row:
+                            if value is None:
+                                values.append('NULL')
+                            elif isinstance(value, str):
+                                values.append(f"'{value.replace("'", "''")}'")
+                            elif isinstance(value, dict):
+                                values.append(f"'{json.dumps(value).replace("'", "''")}'")
+                            else:
+                                values.append(str(value))
+                        
+                        columns = [col.name for col in table.columns]
+                        insert_stmt = f"INSERT INTO {table.name} ({', '.join(columns)}) VALUES ({', '.join(values)});"
+                        backup_sql.append(insert_stmt)
+                    backup_sql.append("")
+        
+        backup_content = '\n'.join(backup_sql)
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        
+        response = make_response(backup_content)
+        response.headers['Content-Type'] = 'application/sql'
+        response.headers['Content-Disposition'] = f'attachment; filename=knowledge_map_backup_{timestamp}.sql'
+        
+        return response
+        
     except Exception as e:
-        app.logger.error(f"Backup error: {e}")
-        return jsonify({"message": "Backup operation failed"}), 500
+        app.logger.error(f"Backup failed: {e}", exc_info=True)
+        return jsonify({"message": f"Backup failed: {str(e)}"}), 500
 
 
 
