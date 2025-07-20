@@ -286,8 +286,8 @@ def init_database():
         app.logger.error(f"Database initialization failed: {e}")
         raise
 
+# app.py - CSVエクスポート機能の改良版
 
-# 方法1: SQLAlchemyを使ったCSVエクスポート（推奨）
 @app.route('/api/admin/export_csv', methods=['GET'])
 @admin_required
 def export_database_csv():
@@ -309,11 +309,12 @@ def export_database_csv():
                 users_data.append({
                     'id': user.id,
                     'username': user.username,
-                    'created_at': user.created_at.isoformat()
+                    'created_at': user.created_at.isoformat() if user.created_at else ''
                 })
-            users_df = pd.DataFrame(users_data)
-            users_csv = users_df.to_csv(index=False)
-            zip_file.writestr('users.csv', users_csv)
+            if users_data:  # データが存在する場合のみCSVを作成
+                users_df = pd.DataFrame(users_data)
+                users_csv = users_df.to_csv(index=False)
+                zip_file.writestr('users.csv', users_csv)
             
             # メモテーブル
             memos_data = []
@@ -323,11 +324,12 @@ def export_database_csv():
                     'id': memo.id,
                     'user_id': memo.user_id,
                     'content': memo.content,
-                    'created_at': memo.created_at.isoformat()
+                    'created_at': memo.created_at.isoformat() if memo.created_at else ''
                 })
-            memos_df = pd.DataFrame(memos_data)
-            memos_csv = memos_df.to_csv(index=False)
-            zip_file.writestr('memos.csv', memos_csv)
+            if memos_data:
+                memos_df = pd.DataFrame(memos_data)
+                memos_csv = memos_df.to_csv(index=False)
+                zip_file.writestr('memos.csv', memos_csv)
             
             # マップ履歴テーブル
             history_data = []
@@ -336,12 +338,31 @@ def export_database_csv():
                 history_data.append({
                     'id': history.id,
                     'memo_id': history.memo_id,
-                    'map_data': json.dumps(history.map_data, ensure_ascii=False),
-                    'created_at': history.created_at.isoformat()
+                    'map_data': json.dumps(history.map_data, ensure_ascii=False) if history.map_data else '',
+                    'created_at': history.created_at.isoformat() if history.created_at else ''
                 })
-            history_df = pd.DataFrame(history_data)
-            history_csv = history_df.to_csv(index=False)
-            zip_file.writestr('map_history.csv', history_csv)
+            if history_data:
+                history_df = pd.DataFrame(history_data)
+                history_csv = history_df.to_csv(index=False)
+                zip_file.writestr('map_history.csv', history_csv)
+            
+            # ナレッジマップテーブル（存在する場合）
+            try:
+                knowledge_maps_data = []
+                knowledge_maps = KnowledgeMap.query.all()
+                for km in knowledge_maps:
+                    knowledge_maps_data.append({
+                        'id': km.id,
+                        'memo_id': km.memo_id,
+                        'map_data': json.dumps(km.map_data, ensure_ascii=False) if km.map_data else '',
+                        'generated_at': km.generated_at.isoformat() if km.generated_at else ''
+                    })
+                if knowledge_maps_data:
+                    km_df = pd.DataFrame(knowledge_maps_data)
+                    km_csv = km_df.to_csv(index=False)
+                    zip_file.writestr('knowledge_maps.csv', km_csv)
+            except Exception as e:
+                app.logger.warning(f"Could not export knowledge_maps table: {e}")
             
             # アクティビティログテーブル
             activity_data = []
@@ -352,11 +373,22 @@ def export_database_csv():
                     'user_id': activity.user_id,
                     'activity_type': activity.activity_type,
                     'details': json.dumps(activity.details, ensure_ascii=False) if activity.details else '',
-                    'timestamp': activity.timestamp.isoformat()
+                    'timestamp': activity.timestamp.isoformat() if activity.timestamp else ''
                 })
-            activity_df = pd.DataFrame(activity_data)
-            activity_csv = activity_df.to_csv(index=False)
-            zip_file.writestr('user_activity_logs.csv', activity_csv)
+            if activity_data:
+                activity_df = pd.DataFrame(activity_data)
+                activity_csv = activity_df.to_csv(index=False)
+                zip_file.writestr('user_activity_logs.csv', activity_csv)
+            
+            # エクスポート情報ファイルを追加
+            export_info = f"""データベースエクスポート情報
+エクスポート日時: {datetime.now().isoformat()}
+総ユーザー数: {len(users_data)}
+総メモ数: {len(memos_data)}
+総マップ履歴数: {len(history_data)}
+総アクティビティログ数: {len(activity_data)}
+"""
+            zip_file.writestr('export_info.txt', export_info)
         
         # レスポンス準備
         zip_buffer.seek(0)
@@ -365,12 +397,15 @@ def export_database_csv():
         response = make_response(zip_buffer.read())
         response.headers['Content-Type'] = 'application/zip'
         response.headers['Content-Disposition'] = f'attachment; filename=database_export_{timestamp}.zip'
+        response.headers['Content-Length'] = len(zip_buffer.getvalue())
         
+        app.logger.info(f"Database CSV export completed successfully for admin user")
         return response
         
     except Exception as e:
         app.logger.error(f"CSV export failed: {e}", exc_info=True)
         return jsonify({"message": f"Export failed: {str(e)}"}), 500
+
 
 # 4. データベース接続の健全性チェック
 @app.route('/api/health', methods=['GET'])
@@ -894,8 +929,6 @@ def backup_database():
     except Exception as e:
         app.logger.error(f"Backup failed: {e}", exc_info=True)
         return jsonify({"message": f"Backup failed: {str(e)}"}), 500
-
-
 
 # ★★★ 新規追加: 全ユーザーの最新マップを統合して取得するAPI ★★★
 @app.route('/api/admin/combined_map', methods=['GET'])
