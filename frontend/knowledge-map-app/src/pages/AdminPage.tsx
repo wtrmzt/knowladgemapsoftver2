@@ -42,9 +42,11 @@ function AdminPage() {
             // aタグを生成してクリックさせ、ダウンロードを実行
             const link = document.createElement('a');
             link.href = downloadUrl;
-            link.setAttribute('download', 'knowledge_map_mvp.db'); // ダウンロードファイル名
+            const timestamp = new Date().toISOString().slice(0, 19).replace(/[:-]/g, '').replace('T', '_');
+            link.setAttribute('download', `database_export_${timestamp}.zip`);
             document.body.appendChild(link);
             link.click();
+
 
             // 後処理
             link.parentNode?.removeChild(link);
