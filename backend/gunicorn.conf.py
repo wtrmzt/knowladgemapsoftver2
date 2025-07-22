@@ -1,7 +1,7 @@
 # gunicorn.conf.py
 
 # ワーカープロセスの数を指定
-workers = 8
+workers = 4
 
 # ★★★ 最も重要な設定 ★★★
 # 非同期ライブラリとしてgeventを使用するよう指定
