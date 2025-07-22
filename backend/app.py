@@ -112,18 +112,15 @@ def load_allowed_users():
     except Exception as e:
         app.logger.error(f"Failed to load allowed users: {e}")
 
+
 def token_required(f):
     @wraps(f)
     def decorated(*args, **kwargs):
-        token = None
-        auth_header = request.headers.get('Authorization')
-        if auth_header and auth_header.startswith('Bearer '):
-            token = auth_header.split(" ")[1]
+        token = request.headers.get('Authorization', ' ').split(' ')[1] if 'Authorization' in request.headers else None
         if not token: return jsonify({'message': 'Token is missing'}), 401
         try:
             data = jwt.decode(token, app.config['SECRET_KEY'], algorithms=["HS256"])
             g.current_user_id = data['user_id']
-            # ★★★ トークンに管理者フラグがあれば、gオブジェクトにセット ★★★
             g.is_admin = data.get('is_admin', False) 
         except Exception as e: return jsonify({'message': f'Token is invalid: {str(e)}'}), 401
         return f(*args, **kwargs)
@@ -187,13 +184,13 @@ from sqlalchemy.dialects.postgresql import UUID
 import uuid
 
 class User(db.Model):
-    __tablename__ = 'users'  # テーブル名を明示的に指定
-    
+    __tablename__ = 'users'
     id = db.Column(db.Integer, primary_key=True)
     username = db.Column(db.String(80), unique=True, nullable=False, index=True)
-    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
-    memos = db.relationship('Memo', backref='author', lazy=True, cascade="all, delete-orphan")
-    logs = db.relationship('UserActivityLog', backref='user', lazy=True, cascade="all, delete-orphan")
+class Memo(db.Model): __tablename__ = 'memos'; id=db.Column(db.Integer, primary_key=True); user_id=db.Column(db.Integer, db.ForeignKey('users.id')); content=db.Column(db.Text); created_at=db.Column(db.DateTime, default=datetime.utcnow)
+class MapHistory(db.Model): __tablename__ = 'map_history'; id=db.Column(db.Integer, primary_key=True); memo_id=db.Column(db.Integer, db.ForeignKey('memos.id')); map_data=db.Column(db.JSON); created_at=db.Column(db.DateTime, default=datetime.utcnow)
+class KnowledgeMap(db.Model): __tablename__ = 'knowledge_maps'; id=db.Column(db.Integer, primary_key=True); memo_id=db.Column(db.Integer, db.ForeignKey('memos.id'), unique=True); map_data=db.Column(db.JSON); generated_at=db.Column(db.DateTime, default=datetime.utcnow)
+class UserActivityLog(db.Model): __tablename__ = 'user_activity_logs'; id=db.Column(db.Integer, primary_key=True); user_id=db.Column(db.Integer, db.ForeignKey('users.id')); activity_type=db.Column(db.String(100)); details=db.Column(db.JSON); timestamp=db.Column(db.DateTime, default=datetime.utcnow)
 
 class Memo(db.Model):
     __tablename__ = 'memos'
@@ -261,6 +258,45 @@ def _build_cors_preflight_response():
 # =============================================================================
 # 4. API Endpoints
 # =============================================================================
+
+uec_courses_df = None
+
+def load_temporal_data():
+    """
+    アプリケーション起動時に、科目関連データ(CSV)を一度だけ読み込む。
+    これにより、リクエストごとのファイルI/Oをなくし、Geventとの競合を避ける。
+    ★★★ 大容量ファイルに対応するため、メモリ使用量を最適化 ★★★
+    """
+    global uec_courses_df
+    try:
+        file_path = os.path.join(os.path.dirname(__file__), 'uec_courses.csv')
+        if os.path.exists(file_path):
+            # 必要な列だけを、メモリ効率の良いデータ型で読み込む
+            required_columns = ['ID', '科目名', '概要', '前提科目', '発展科目']
+            column_dtypes = {
+                'ID': 'uint16',  # 65535までのIDをサポート
+                '科目名': 'category', # 重複の多い文字列はcategory型が非常に効率的
+                '概要': 'string',
+                '前提科目': 'string',
+                '発展科目': 'string'
+            }
+            
+            uec_courses_df = pd.read_csv(
+                file_path,
+                usecols=required_columns,
+                dtype=column_dtypes
+            )
+            app.logger.info(f"Successfully loaded and optimized temporal UEC course data from {file_path}.")
+            # メモリ使用量をログに出力（デバッグ用）
+            mem_usage = uec_courses_df.memory_usage(deep=True).sum() / (1024**2)
+            app.logger.info(f"Optimized DataFrame memory usage: {mem_usage:.2f} MB")
+
+        else:
+            app.logger.warning(f"Temporal data file 'uec_courses.csv' not found. The feature will be disabled.")
+            uec_courses_df = pd.DataFrame()
+    except Exception as e:
+        app.logger.error(f"Failed to load temporal data: {e}", exc_info=True)
+        uec_courses_df = pd.DataFrame()
 
 
 # 3. データベース初期化とマイグレーション用の関数
