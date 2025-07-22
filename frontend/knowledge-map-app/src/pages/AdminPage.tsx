@@ -16,7 +16,7 @@ function AdminPage() {
         if (!token) {
             alert('管理者としてログインしていません。');
             setIsDownloading(false);
-            return;
+            return;                                                                                        
         }
 
         // 環境変数からAPIのベースURLを取得。なければローカルのURLを仮定。

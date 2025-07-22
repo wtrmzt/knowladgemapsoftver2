@@ -1,6 +1,7 @@
 // src/pages/DashboardPage.tsx
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { useNodesState, useEdgesState } from 'reactflow';
+// ★ 変更点: addEdge と Connection を reactflow からインポート
+import { useNodesState, useEdgesState, addEdge, Connection } from 'reactflow';
 import type { Node, Edge } from 'reactflow';
 import KnowledgeMapDisplay from '../components/KnowledgeMapDisplay';
 import MemoInput from '../components/MemoInput';
@@ -15,27 +16,79 @@ import { loggingService } from '../services/loggingService';
 
 type CustomNodeType = Node<CustomNodeData>;
 
-// --- 新しいUIのためのメインコンポーネント ---
 function DashboardPage() {
   const { toast } = useToast();
 
-  // --- 既存のState管理ロジック (全て保持) ---
   const [nodes, setNodes, onNodesChange] = useNodesState<CustomNodeData>([]);
-
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge[]>([]);
   const [currentMemo, setCurrentMemo] = useState<Memo | null>(null);
   const [mapDataFromApi] = useState<ApiKnowledgeMapResponse | null>(null);
 
   const [isMemoPanelOpen, setIsMemoPanelOpen] = useState(false);
   const [isLoadingData, setIsLoadingData] = useState(true);
-  // メモ保存・マップ生成中の状態は未使用のため削除
   const [layoutTrigger, setLayoutTrigger] = useState(0);
 
-  // ★★★ 自動保存のための状態を追加 ★★★
   const saveTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const [isSaving, setIsSaving] = useState(false);
 
-  // --- 既存のデータ処理・イベントハンドラ (全て保持) ---
+  // ★ 変更点: onConnect ハンドラを追加
+  // この関数は、ユーザーがUI上でノードを接続したときにReact Flowによって呼び出される。
+  const onConnect = useCallback(
+    (params: Connection) => {
+      loggingService.logActivity('CONNECT_NODES', { source: params.source, target: params.target });
+      // addEdgeヘルパー関数を使って、新しいエッジを既存のエッジリストに追加する
+      setEdges((eds) => addEdge({ ...params, animated: true, style: { strokeWidth: 2 } }, eds));
+      toast({ title: "エッジを追加しました", description: `ノードを接続しました。` });
+    },
+    [setEdges, toast]
+  );
+  
+  // ★ 変更点: 手動でノードを追加するためのハンドラを追加
+  const handleManualNodeAdd = useCallback(async (label: string) => {
+    if (!label.trim()) {
+      toast({ title: "入力エラー", description: "ノード名が空です。", variant: "destructive" });
+      return;
+    }
+    if (!currentMemo) {
+      toast({ title: "エラー", description: "ノードを追加するマップがありません。まずメモを作成してください。", variant: "destructive" });
+      return;
+    }
+    loggingService.logActivity('MANUAL_ADD_NODE_START', { label });
+    try {
+      // バックエンドAPIを呼び出して、AIにノード情報を生成させる
+      const apiNode = await mapService.createManualNode(label);
+      
+      // APIから返されたデータを使って、React Flowで表示するための新しいノードオブジェクトを作成
+      const newNode: CustomNodeType = {
+        id: apiNode.id,
+        // 新しいノードが他のノードと重ならないように、ランダムな位置に配置
+        position: { x: Math.random() * 400 - 200, y: Math.random() * 400 - 200 },
+        type: 'default', // デフォルトのノードタイプを使用
+        data: {
+            label: apiNode.label,
+            sentence: apiNode.sentence,
+            apiNodeId: apiNode.id,
+            all_qids: apiNode.extend_query || [],
+        },
+        // 新しく追加されたことがわかるようにスタイルを適用
+        style: { 
+            backgroundColor: 'hsl(var(--muted))', 
+            borderColor: 'hsl(var(--primary))' 
+        },
+      };
+
+      // 作成したノードを既存のノードリストに追加して、画面を更新
+      setNodes((nds) => [...nds, newNode]);
+      toast({ title: "成功", description: `ノード「${label}」を追加しました。` });
+      loggingService.logActivity('MANUAL_ADD_NODE_SUCCESS', { nodeId: newNode.id, label: newNode.data.label });
+
+    } catch (error: any) {
+      toast({ title: "ノード追加エラー", description: error.message, variant: "destructive" });
+      loggingService.logActivity('MANUAL_ADD_NODE_FAILURE', { label, error: error.message });
+    }
+  }, [setNodes, toast, currentMemo]);
+
+  // (既存の useEffect, useCallback は変更なしのため省略)
   useEffect(() => {
     const apiMapData = mapDataFromApi?.map_data;
     if (!apiMapData || !Array.isArray(apiMapData.nodes)) {
@@ -65,16 +118,12 @@ function DashboardPage() {
     setTimeout(() => setLayoutTrigger(p => p + 1), 100);
   }, [mapDataFromApi, setNodes, setEdges]);
   
-  // handleApplyTemporalMapとhandleNodeAddedの引数とロジックを修正
   const handleApplyTemporalMap = useCallback((newNodes: CustomNodeType[], newEdges: Edge[]) => {
-    // 既存のノードと新しいノードを結合
     setNodes((currentNodes) => [...currentNodes, ...newNodes]);
     setEdges((currentEdges) => [...currentEdges, ...newEdges]);
-    // レイアウト更新をトリガー
     setTimeout(() => setLayoutTrigger(p => p + 1), 100);
   }, [setNodes, setEdges]);
   
-  // `newNode`がnullの場合（エッジのみ追加）も考慮するように修正
   const handleNodeAdded = useCallback((newNode: CustomNodeType | null, newEdge: Edge) => {
     if (newNode) {
       setNodes((nds) => [...nds, newNode]);
@@ -85,13 +134,9 @@ function DashboardPage() {
     setTimeout(() => setLayoutTrigger(p => p + 1), 100);
   }, [setNodes, setEdges]);
 
-  // APIから取得したマップデータをReact Flowの形式に変換し、stateを更新する関数
   const applyMapData = useCallback((mapData: KnowledgeMap['map_data'] | null) => {
-    console.log("DashboardPage: Applying map data from server:", mapData);
     if (mapData && Array.isArray(mapData.nodes)) {
       const loadedNodes: CustomNodeType[] = mapData.nodes.map((savedNode: any) => {
-        // ★★★ ここが重要な修正点 ★★★
-        // 新旧のデータ構造を判別し、どちらの形式でも正しく情報を抽出します。
         const hasNewStructure = savedNode.data && typeof savedNode.data.label !== 'undefined';
         const nodeData = hasNewStructure ? savedNode.data : savedNode;
 
@@ -112,7 +157,6 @@ function DashboardPage() {
         id: String(e.id), source: String(e.source), target: String(e.target), animated: e.animated,
       }));
 
-      console.log("DashboardPage: Transformed nodes for React Flow:", loadedNodes);
       setNodes(loadedNodes);
       setEdges(loadedEdges);
       setTimeout(() => setLayoutTrigger(p => p + 1), 100);
@@ -122,8 +166,6 @@ function DashboardPage() {
     }
   }, [setNodes, setEdges]);
 
-
-  // ページ読み込み時に最新のメモとマップを取得する関数
   const loadLatestData = useCallback(async () => {
     setIsLoadingData(true);
     try {
@@ -140,7 +182,6 @@ function DashboardPage() {
     } catch (error: any) {
       toast({ title: "データ読み込みエラー", description: "以前のデータの読み込みに失敗しました。", variant: "destructive" });
     } finally {
-      // ★★★ 重要な修正: ローディング完了を正しく設定 ★★★
       setIsLoadingData(false);
     }
   }, [toast, applyMapData]);
@@ -172,7 +213,6 @@ function DashboardPage() {
     return () => { if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current); };
   }, [nodes, edges, currentMemo, isLoadingData, toast]);
 
-  // メモを保存し、続けてマップを生成する関数
   const handleSaveAndGenerate = useCallback(async (text: string) => {
     if (!text.trim()) {
       toast({ title: "入力エラー", description: "メモ内容が空です。", variant: "destructive" });
@@ -193,14 +233,9 @@ function DashboardPage() {
       setIsMemoPanelOpen(false);
     }
   }, [toast, applyMapData]);
-  
 
   return (
-    // --- 全体のコンテナ ---
     <div className="w-screen h-screen bg-[#1a202c] text-white overflow-hidden relative font-sans">
-      
-      {/* --- メインコンテンツエリア (マップ表示領域) --- */}
-      {/* ★★★ inset-0 でウィンドウ全体に広げ、メモパネルの状態で左マージンを制御 ★★★ */}
       <main className={`absolute inset-0 transition-all duration-500 ease-in-out ${isMemoPanelOpen ? 'ml-[400px]' : 'ml-0'}` }>
         <KnowledgeMapDisplay 
           nodes={nodes}
@@ -208,22 +243,17 @@ function DashboardPage() {
           onNodesChange={onNodesChange}
           onEdgesChange={onEdgesChange}
           onNodeAdded={handleNodeAdded}
-          onApplyTemporalMap={handleApplyTemporalMap}          // layoutTriggerをpropsとして渡す
+          onApplyTemporalMap={handleApplyTemporalMap}
           layoutTrigger={layoutTrigger}
+          onConnect={onConnect} // ★ 変更点: onConnect ハンドラを渡す
+          onManualNodeAdd={handleManualNodeAdd} // ★ 変更点: 手動追加ハンドラを渡す
         />
       </main>
 
-
-      {/* --- 背景デザイン要素 (マップの上にオーバーレイ) --- */}
-      {/* ★★★ pointer-events-noneで、下のマップへのクリックを透過させる ★★★ */}
       <div className="absolute inset-0 pointer-events-none z-10">
-        {/*<div className="absolute top-8 left-8 right-8 h-12 border-t-2 border-b-2 border-blue-400/20"></div>
-        <div className="absolute bottom-8 left-8 right-8 h-8 border-b-2 border-blue-400/20"></div>
-        <div className="absolute top-8 left-8 bottom-8 w-8 border-l-2 border-r-2 border-blue-400/20"></div>*/}
         <div className="absolute top-8 right-8 bottom-8 w-8 border-l-2 border-r-2 border-blue-400/20"></div>
       </div>
 
-      {/* --- 右側のフローティングメニュー (最前面から2番目) --- */}
       <aside className="absolute top-1/2 right-8 -translate-y-1/2 flex flex-col items-center gap-4 z-20">
         <Button variant="ghost" size="icon" className="bg-gray-700/50 hover:bg-gray-600/70 rounded-full w-12 h-12 backdrop-blur-sm">
           <Cog className="w-6 h-6" />
@@ -254,8 +284,8 @@ function DashboardPage() {
             <MemoInput 
               initialText={currentMemo?.content || ''} 
               onSave={handleSaveAndGenerate}
-              isloading={isLoadingData} // isLoadingをpropsとして渡す
-              memokey={currentMemo?.id} // メモのIDをkeyとして渡す
+              isloading={isLoadingData}
+              memokey={currentMemo?.id}
             />
           </div>
         </div>

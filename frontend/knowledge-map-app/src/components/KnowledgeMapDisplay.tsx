@@ -9,13 +9,15 @@ import ReactFlow, {
   useEdgesState,
   useReactFlow,
 } from 'reactflow';
-import type { Node, Edge, OnNodesChange, OnEdgesChange, NodeMouseHandler } from 'reactflow';
+// ★ 変更点: Connection と、新しいアイコン(Plus)をインポート
+import type { Node, Edge, OnNodesChange, OnEdgesChange, NodeMouseHandler, Connection } from 'reactflow';
 import 'reactflow/dist/style.css';
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { Input } from "@/components/ui/input"; // ★ 変更点: Inputをインポート
 import { mapService } from '@/services/mapService';
 import { loggingService } from '@/services/loggingService';
-import { Loader2, Search, PlusCircle, CheckCircle, History, ArrowLeft, X, CornerUpRight, Link as ExternalLink } from 'lucide-react';
+import { Loader2, Search, CheckCircle, History, ArrowLeft, X, CornerUpRight, Link as ExternalLink, BrainCircuit, Sparkles, Plus } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import {
   Sheet,
@@ -30,6 +32,7 @@ import ELK from 'elkjs/lib/elk.bundled.js';
 
 type CustomNodeType = Node<CustomNodeData>;
 
+// ★ 変更点: Propsのインターフェースを更新
 interface KnowledgeMapDisplayProps {
   nodes: CustomNodeType[];
   edges: Edge[];
@@ -37,13 +40,12 @@ interface KnowledgeMapDisplayProps {
   onEdgesChange: OnEdgesChange;
   onNodeAdded: (newNode: CustomNodeType | null, newEdge: Edge) => void;
   onApplyTemporalMap: (newNodes: CustomNodeType[], newEdges: Edge[]) => void;
-  setNodesForLayout?: (nodes: CustomNodeType[]) => void;
   layoutTrigger?: number;
+  onConnect: (connection: Connection) => void; // エッジ接続ハンドラ
+  onManualNodeAdd: (label: string) => Promise<void>; // 手動ノード追加ハンドラ
 }
 
-/**
- * プレビューパネル用のReactFlowインスタンス
- */
+// (PreviewPane, TemporalMapSheetContent コンポーネントは変更なしのため省略)
 const PreviewPane: React.FC<{
     temporalMapData: TemporalRelatedNodesResponse | null;
     baseNode: CustomNodeType | null;
@@ -70,7 +72,6 @@ const PreviewPane: React.FC<{
         const apiBaseNodeId = `input_${baseNode.data.label}`;
         const allApiNodes = [...(temporalMapData.past_map?.nodes ?? []), ...(temporalMapData.future_map?.nodes ?? [])];
         
-        // 基準ノードも含めて重複を排除
         const uniqueNodesMap = new Map(allApiNodes.map(node => [String(node.id), node]));
         if (!uniqueNodesMap.has(apiBaseNodeId)) {
             uniqueNodesMap.set(apiBaseNodeId, { 
@@ -98,11 +99,8 @@ const PreviewPane: React.FC<{
         }));
         
         const nodeIds = new Set(initialNodes.map(n => n.id));
-
-        // ★★★ 修正1: エッジの処理を修正 ★★★
         const allApiEdges = [...(temporalMapData.past_map?.edges ?? []), ...(temporalMapData.future_map?.edges ?? [])];
         
-        // APIエッジのfrom/toフィールドをsource/targetに統一
         const initialEdges: Edge[] = allApiEdges
             .filter(apiEdge => {
                 const sourceId = String(apiEdge.from || apiEdge.source);
@@ -117,7 +115,6 @@ const PreviewPane: React.FC<{
                 style: { stroke: '#999', strokeWidth: 2 },
             }));
         
-        // ★★★ 修正2: ELKのエッジ定義を修正 ★★★
         const graph = {
             id: 'root',
             layoutOptions: elkLayoutOptions,
@@ -144,16 +141,13 @@ const PreviewPane: React.FC<{
                     } 
                 }));
                 
-                // ★★★ 修正3: ノードとエッジを同時に設定 ★★★
                 setPreviewNodes(finalNodes);
                 setPreviewEdges(initialEdges);
                 
-                // レイアウト後にフィットビューを実行
                 setTimeout(() => fitView({ padding: 0.1, duration: 250 }), 100);
             })
             .catch(error => {
                 console.error('ELK Layout Error:', error);
-                // エラーが発生した場合もノードとエッジを設定
                 setPreviewNodes(initialNodes);
                 setPreviewEdges(initialEdges);
             });
@@ -167,7 +161,6 @@ const PreviewPane: React.FC<{
             onNodesChange={onPreviewNodesChange} 
             onEdgesChange={onPreviewEdgesChange} 
             fitView
-            // ★★★ 修正4: ReactFlowの設定を追加 ★★★
             nodesDraggable={false}
             nodesConnectable={false}
             elementsSelectable={false}
@@ -179,8 +172,6 @@ const PreviewPane: React.FC<{
         </ReactFlow>
     );
 };
-
-// --- TemporalMapSheetContent コンポーネント (ロジック分離版) ---
 const TemporalMapSheetContent: React.FC<{
     isOpen: boolean;
     onOpenChange: (isOpen: boolean) => void;
@@ -191,7 +182,6 @@ const TemporalMapSheetContent: React.FC<{
     const [isLoading, setIsLoading] = useState(false);
     const [temporalMapData, setTemporalMapData] = useState<TemporalRelatedNodesResponse | null>(null);
 
-    // API呼び出しを行うuseEffect
     useEffect(() => {
         if (isOpen && baseNode) {
             if (!baseNode.data.label) {
@@ -223,7 +213,6 @@ const TemporalMapSheetContent: React.FC<{
     const handleApply = () => {
         if (!temporalMapData || !baseNode) return;
 
-        // 1. 過去/未来のノードを分類するための準備
         const pastApiNodes = temporalMapData.past_map?.nodes ?? [];
         const futureApiNodes = temporalMapData.future_map?.nodes ?? [];
         const pastNodeIds = new Set(pastApiNodes.map(n => n.id));
@@ -233,18 +222,16 @@ const TemporalMapSheetContent: React.FC<{
         const uniqueNodesMap = new Map(allApiNodes.map(node => [node.id, node]));
         const apiBaseNodeId = `input_${baseNode.data.label}`;
 
-        // 2. メインマップに追加するノードを生成 (配置とスタイルを適用)
         const nodesToApply: CustomNodeType[] = [];
         let pastNodeIndex = 0;
         let futureNodeIndex = 0;
 
         uniqueNodesMap.forEach((apiNode, nodeId) => {
-            if (nodeId === apiBaseNodeId) return; // API側の基準ノードは追加しない
+            if (nodeId === apiBaseNodeId) return; 
 
             let nodeStyle = {};
             let nodePosition = { x: baseNode.position.x, y: baseNode.position.y };
             
-            // 過去か未来かでスタイルと配置を決定
             if (pastNodeIds.has(nodeId)) {
                 nodeStyle = { backgroundColor: 'hsl(0 100% 95%)', color: 'hsl(0 70% 40%)', borderColor: 'hsl(0 80% 80%)' };
                 nodePosition = {
@@ -275,12 +262,10 @@ const TemporalMapSheetContent: React.FC<{
             });
         });
 
-        // 3. メインマップに追加するエッジを生成
         const allApiEdges = [...(temporalMapData.past_map?.edges ?? []), ...(temporalMapData.future_map?.edges ?? [])];
         const edgesToApply: Edge[] = [];
 
         allApiEdges.forEach((apiEdge, i) => {
-            // ★★★ 修正5: エッジのフィールド名を統一 ★★★
             const sourceId = (apiEdge.from || apiEdge.source) === apiBaseNodeId 
                 ? baseNode.id 
                 : String(apiEdge.from || apiEdge.source);
@@ -288,7 +273,7 @@ const TemporalMapSheetContent: React.FC<{
                 ? baseNode.id 
                 : String(apiEdge.to || apiEdge.target);
             
-            if (sourceId === targetId) return; // 自己参照ループは追加しない
+            if (sourceId === targetId) return;
 
             edgesToApply.push({ 
                 id: `applied-${sourceId}-${targetId}-${i}`, 
@@ -299,7 +284,6 @@ const TemporalMapSheetContent: React.FC<{
             });
         });
 
-        // 4. 親コンポーネントの関数を呼び出して状態を更新
         onApply(nodesToApply, edgesToApply);
         onOpenChange(false);
     };
@@ -331,9 +315,45 @@ const TemporalMapSheetContent: React.FC<{
     );
 };
 
+// ★ 変更点: 手動でノードを追加するためのUIコンポーネント
+const ManualNodeAdder: React.FC<{
+  onAdd: (label: string) => Promise<void>;
+}> = ({ onAdd }) => {
+  const [label, setLabel] = useState('');
+  const [isLoading, setIsLoading] = useState(false);
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!label.trim() || isLoading) return;
+
+    setIsLoading(true);
+    await onAdd(label);
+    setIsLoading(false);
+    setLabel('');
+  };
+
+  return (
+    // ★ 変更点: フォーム全体のスタイルを調整
+    <form onSubmit={handleSubmit} className="absolute top-4 left-4 z-10 flex items-center gap-2 p-2 bg-gray-900/80 backdrop-blur-sm rounded-lg border border-gray-700 shadow-lg">
+      <Input 
+        placeholder="新しいノード名..." 
+        value={label}
+        onChange={(e) => setLabel(e.target.value)}
+        // ★ 変更点: 背景色、文字色、プレースホルダー色を明示的に指定して視認性を確保
+        className="w-48 bg-gray-800 text-white border-gray-600 placeholder:text-gray-400"
+      />
+      <Button type="submit" size="icon" disabled={!label.trim() || isLoading}>
+        {isLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
+      </Button>
+    </form>
+  );
+};
+
+
 
 function KnowledgeMapDisplay(props: KnowledgeMapDisplayProps) {
-    const { nodes, onNodeAdded, onApplyTemporalMap } = props;
+    // ★ 変更点: propsから onConnect と onManualNodeAdd を受け取る
+    const { onNodeAdded, onApplyTemporalMap, onConnect, onManualNodeAdd } = props;
     const { toast } = useToast();
     const [isSheetOpen, setIsSheetOpen] = useState(false);
     const [selectedNode, setSelectedNode] = useState<CustomNodeType | null>(null);
@@ -348,16 +368,15 @@ function KnowledgeMapDisplay(props: KnowledgeMapDisplayProps) {
         setIsSheetOpen(true);
     }, []);
 
-    // ★★★ 修正点1: ラベルをキーとして、マップ上の既存ノードを高速に検索できるようにする ★★★
     const nodeLabelMap = useMemo(() => {
         const map = new Map<string, CustomNodeType>();
-        nodes.forEach(node => {
+        props.nodes.forEach(node => {
             if (typeof node.data.label === 'string') {
                 map.set(node.data.label, node);
             }
         });
         return map;
-    }, [nodes]);
+    }, [props.nodes]);
 
     const handleFetchSuggestions = useCallback(async () => {
         if (!selectedNode?.data.label) return;
@@ -374,11 +393,10 @@ function KnowledgeMapDisplay(props: KnowledgeMapDisplayProps) {
     }, [selectedNode, toast]);
 
     const addedNodeLabels = useMemo(() => {
-        // 現在マップ上にあるすべてのノードの「ラベル」をSetに集める
         return new Set(
-            nodes.map(n => n.data.label)
+            props.nodes.map(n => n.data.label)
         );
-    }, [nodes]); // props.nodesが変更されるたびに再計算
+    }, [props.nodes]); 
     
     const handleSheetOpenChange = useCallback((open: boolean) => {
         setIsSheetOpen(open);
@@ -392,34 +410,37 @@ function KnowledgeMapDisplay(props: KnowledgeMapDisplayProps) {
         setIsSheetOpen(false);
     }, [selectedNode]);
 
-    // ★★★ 修正点2: ノードの追加とエッジの接続を両方扱えるようにロジックを更新 ★★★
-    const handleSuggestionClick = useCallback((suggestedNode: SuggestedNode) => {
+    const handleSuggestionClick = useCallback((suggestedNode: SuggestedNode, type: 'learned' | 'interested') => {
         if (!selectedNode) return;
 
         const existingNode = nodeLabelMap.get(suggestedNode.label);
 
         if (existingNode) {
-            // --- ケースA: ノードが既に存在する場合 → エッジだけを追加 ---
             loggingService.logActivity('CONNECT_EXISTING_NODE', { from: selectedNode.id, to: existingNode.id });
 
             const newEdge: Edge = { 
-                id: `e-${selectedNode.id}-to-${existingNode.id}`, 
+                id: `e-${selectedNode.id}-to-${existingNode.id}-${Math.random()}`,
                 source: selectedNode.id, 
                 target: existingNode.id, 
                 animated: true 
             };
             
-            
-            // newNodeにnullを渡すことで、エッジのみを追加するよう親コンポーネントに伝える
             onNodeAdded(null, newEdge); 
-            toast({ title: "成功", description: `ノード「${existingNode.data.label}」に接続しました。` });
+            toast({ title: "接続しました", description: `既存のノード「${existingNode.data.label}」に接続しました。` });
 
         } else {
-            // --- ケースB: ノードが存在しない場合 → 新しいノードとエッジを追加 ---
-            loggingService.logActivity('ADD_SUGGESTED_NODE', { baseNodeId: selectedNode.id, addedNodeLabel: suggestedNode.label });
+            loggingService.logActivity('ADD_SUGGESTED_NODE', { 
+                baseNodeId: selectedNode.id, 
+                addedNodeLabel: suggestedNode.label,
+                type: type
+            });
 
-            // IDの重複を完全に防ぐため、ランダムなIDを生成
             const newNodeId = `user-added-${crypto.randomUUID()}`;
+            
+            const nodeStyle = type === 'learned'
+              ? { backgroundColor: 'hsl(140, 50%, 95%)', color: 'hsl(140, 80%, 20%)', borderColor: 'hsl(140, 50%, 80%)' }
+              : { backgroundColor: 'hsl(45, 100%, 95%)', color: 'hsl(45, 90%, 25%)', borderColor: 'hsl(45, 100%, 80%)' };
+
             const newNode: CustomNodeType = {
                 id: newNodeId,
                 data: { 
@@ -428,10 +449,10 @@ function KnowledgeMapDisplay(props: KnowledgeMapDisplayProps) {
                     apiNodeId: suggestedNode.id 
                 },
                 position: { 
-                    x: selectedNode.position.x + 150 + (Math.random() * 40 - 20), 
-                    y: selectedNode.position.y + 60 + (Math.random() * 40 - 20) 
+                    x: selectedNode.position.x + 200 + (Math.random() * 50 - 25), 
+                    y: selectedNode.position.y + 80 + (Math.random() * 50 - 25) 
                 },
-                style: { background: 'hsl(var(--secondary))', color: 'hsl(var(--secondary-foreground))' },
+                style: nodeStyle,
             };
 
             const newEdge: Edge = { 
@@ -442,14 +463,23 @@ function KnowledgeMapDisplay(props: KnowledgeMapDisplayProps) {
             };
 
             onNodeAdded(newNode, newEdge);
-            toast({ title: "成功", description: `ノード「${suggestedNode.label}」を追加しました。` });
+            toast({ 
+                title: "追加しました", 
+                description: `ノード「${suggestedNode.label}」を${type === 'learned' ? '学習済み' : '興味あり'}として追加しました。` 
+            });
         }
     }, [selectedNode, nodeLabelMap, onNodeAdded, toast]);
     
     return (
         <div className="w-full h-full rounded-md border bg-background relative">
             <ReactFlowProvider>
-                <ReactFlow {...props} onNodeClick={onNodeClick}>
+                {/* ★ 変更点: ManualNodeAdder コンポーネントを配置 */}
+                <ManualNodeAdder onAdd={onManualNodeAdd} />
+                <ReactFlow 
+                  {...props} 
+                  onNodeClick={onNodeClick}
+                  onConnect={onConnect} // ★ 変更点: onConnect をReactFlowに渡す
+                >
                     <MiniMap /><Controls /><Background />
                 </ReactFlow>
             </ReactFlowProvider>
@@ -466,7 +496,6 @@ function KnowledgeMapDisplay(props: KnowledgeMapDisplayProps) {
                             <span className="sr-only">Close</span>
                         </SheetClose>
                     </SheetHeader>
-                            {/* ★★★ Google検索リンクボタンを追加 ★★★ */}
                             <Button variant="outline" className="w-full" asChild>
                                 <a href={`https://www.google.com/search?q=${encodeURIComponent(selectedNode?.data?.label ?? "")}`} target="_blank" rel="noopener noreferrer">
                                     <ExternalLink className="h-4 w-4 mr-2" />
@@ -494,17 +523,33 @@ function KnowledgeMapDisplay(props: KnowledgeMapDisplayProps) {
                             <ScrollArea className="flex-grow my-4 -mx-6">
                                 <div className="px-6">
                                 {suggestedNodes.length > 0 ? (
-                                    <ul className="space-y-2">
+                                    <ul className="space-y-3">
                                         {suggestedNodes.map(sNode => {
                                         const isAdded = addedNodeLabels.has(sNode.label);
                                         
                                             return (
-                                                <li key={sNode.id} className={`p-3 border rounded-md flex justify-between items-center ${isAdded ? 'bg-muted/50' : ''}`}>
-                                                    <h5 className="font-semibold text-sm">{sNode.label}</h5>
-                                                    <Button variant="outline" size="sm" disabled={isAdded} onClick={() => handleSuggestionClick(sNode)}>
-                                                        {isAdded ? <CheckCircle className="h-3 w-3 mr-1.5" /> : <PlusCircle className="h-3 w-3 mr-1.5" />}
-                                                        {isAdded ? '追加済' : '追加'}
-                                                    </Button>
+                                                <li key={sNode.id} className={`p-3 border rounded-md transition-colors ${isAdded ? 'bg-muted/50' : 'bg-background'}`}>
+                                                    <div className="flex justify-between items-center">
+                                                        <h5 className="font-semibold text-sm pr-2">{sNode.label}</h5>
+                                                        {isAdded && (
+                                                            <div className="flex items-center text-sm text-muted-foreground">
+                                                                <CheckCircle className="h-4 w-4 mr-1.5 text-green-500" />
+                                                                <span>追加済</span>
+                                                            </div>
+                                                        )}
+                                                    </div>
+                                                    {!isAdded && (
+                                                      <div className="mt-2 pt-2 border-t border-dashed flex justify-end items-center gap-2">
+                                                          <Button variant="outline" size="sm" className="text-green-700 border-green-200 hover:bg-green-50 hover:text-green-800" onClick={() => handleSuggestionClick(sNode, 'learned')}>
+                                                              <BrainCircuit className="h-4 w-4 mr-1.5" />
+                                                              学習した
+                                                          </Button>
+                                                          <Button variant="outline" size="sm" className="text-amber-700 border-amber-200 hover:bg-amber-50 hover:text-amber-800" onClick={() => handleSuggestionClick(sNode, 'interested')}>
+                                                              <Sparkles className="h-4 w-4 mr-1.5" />
+                                                              興味ある
+                                                          </Button>
+                                                      </div>
+                                                    )}
                                                 </li>
                                             );
                                         })}

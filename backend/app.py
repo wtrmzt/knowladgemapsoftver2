@@ -843,6 +843,75 @@ def get_system_stats():
         app.logger.error(f"Error fetching stats: {e}", exc_info=True)
         return jsonify({"message": "Failed to fetch system statistics"}), 500
 
+import uuid # ★ 変更点: UUIDライブラリをインポート
+
+@app.route('/api/nodes/create_manual', methods=['POST'])
+@token_required
+def create_manual_node():
+    """ユーザーが手動で入力したラベルに基づいて新しいノードを生成する"""
+    data = request.get_json()
+    node_label = data.get('label')
+
+    if not node_label:
+        return jsonify({"message": "Node label is required"}), 400
+
+    app.logger.info(f"Manually creating node for label: {node_label}")
+
+    # OpenAIキーが設定されていない場合は、ダミーデータを返す
+    if not OPENAI_API_KEY or OPENAI_API_KEY == "YOUR_OPENAI_API_KEY_HERE":
+        app.logger.info(f"Using dummy data for manually created node '{node_label}' as OpenAI API key is not set.")
+        new_node_data = {
+            "id": f"manual_{node_label.replace(' ', '_')}_{uuid.uuid4().hex[:6]}",
+            "label": node_label,
+            "sentence": f"これは「{node_label}」について手動で作成されたダミーノードです。APIキーを設定すると、AIによる説明が生成されます。",
+            "extend_query": [f"{node_label}とは", f"{node_label}の例"]
+        }
+        return jsonify(new_node_data), 200
+
+    try:
+        # AIに渡すプロンプトを定義
+        prompt_text = f"""
+        与えられたトピック「{node_label}」について、学習のための情報を生成してください。
+        以下のJSONオブジェクト形式で、オブジェクト単体を返してください:
+        {{
+          "id": "manual_{str(uuid.uuid4())}",
+          "label": "{node_label}",
+          "sentence": "トピックに関する140字以内の簡潔な説明文",
+          "extend_query": ["関連検索クエリ1", "関連検索クエリ2", "関連検索クエリ3"]
+        }}
+
+        - idは "manual_" で始まるユニークな文字列にしてください。
+        """
+        
+        client = openai.OpenAI(api_key=OPENAI_API_KEY)
+        chat_completion = client.chat.completions.create(
+            messages=[
+                {"role": "system", "content": "あなたは優秀な教育アシスタントで、与えられたトピックから知識ノードの情報をJSON形式で生成します。"},
+                {"role": "user", "content": prompt_text}
+            ],
+            model="gpt-4-turbo",
+            response_format={ "type": "json_object" },
+            temperature=0.2
+        )
+        
+        response_content = chat_completion.choices[0].message.content
+        app.logger.info(f"OpenAI raw response for create_manual_node ('{node_label}'): {response_content}")
+        
+        new_node_data = json.loads(response_content)
+        
+        # 必須キーの検証
+        if not all(key in new_node_data for key in ["id", "label", "sentence", "extend_query"]):
+             raise ValueError("OpenAI response is missing required keys.")
+
+        return jsonify(new_node_data), 201
+
+    except openai.APIError as e:
+        app.logger.error(f"OpenAI API Error during manual node creation for '{node_label}': {e}", exc_info=True)
+        return jsonify({"message": f"OpenAI API Error: {str(e)}"}), 503
+    except Exception as e:
+        app.logger.error(f"Error creating manual node for '{node_label}': {e}", exc_info=True)
+        return jsonify({"message": f"Error creating manual node: {str(e)}"}), 500
+
 @app.route('/api/admin/rollback/<int:memo_id>', methods=['POST'])
 @admin_required
 def rollback_map_history(memo_id):
