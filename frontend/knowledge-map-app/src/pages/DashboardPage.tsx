@@ -214,26 +214,41 @@ function DashboardPage() {
   }, [nodes, edges, currentMemo, isLoadingData, toast]);
 
   // ★★★ 修正点: 新しいサービスを呼び出すように変更 ★★★
-  const handleSaveAndGenerate = useCallback(async (text: string) => {
-    if (!text.trim()) {
-      toast({ title: "入力エラー", description: "メモ内容が空です。", variant: "destructive" });
-      return;
-    }
-    try {
-      // 1. メモと初期マップの作成を一度にリクエスト
-      const { memo: savedMemo, map: initialMap } = await memoService.createMemoWithMap(text);
-      
-      // 2. 返ってきたデータでstateを更新
-      setCurrentMemo(savedMemo);
-      applyMapData(initialMap.map_data);
-      
-      toast({ title: "成功", description: "新しいメモとマップを作成しました。" });
-    } catch (error: any) {
-      toast({ title: "処理エラー", description: "メモとマップの作成に失敗しました。", variant: "destructive" });
-    } finally {
-      setIsMemoPanelOpen(false);
-    }
-  }, [toast, applyMapData]);
+const handleSaveAndGenerate = useCallback(async (text: string) => {
+  if (!text.trim()) {
+    toast({ title: "入力エラー", description: "メモ内容が空です。", variant: "destructive" });
+    return;
+  }
+  
+  // ローディング状態を設定
+  setIsLoadingData(true);
+  
+  try {
+    console.log('Creating memo with map for text:', text);
+    
+    // 1. メモと初期マップの作成を一度にリクエスト
+    const { memo: savedMemo, map: initialMap } = await memoService.createMemoWithMap(text);
+    
+    console.log('Successfully created memo and map:', { savedMemo, initialMap });
+    
+    // 2. 返ってきたデータでstateを更新
+    setCurrentMemo(savedMemo);
+    applyMapData(initialMap.map_data);
+    
+    toast({ title: "成功", description: "新しいメモとマップを作成しました。" });
+    
+  } catch (error: any) {
+    console.error('handleSaveAndGenerate error:', error);
+    toast({ 
+      title: "処理エラー", 
+      description: error.message || "メモとマップの作成に失敗しました。", 
+      variant: "destructive" 
+    });
+  } finally {
+    setIsLoadingData(false);
+    setIsMemoPanelOpen(false);
+  }
+}, [toast, applyMapData]);
 
   return (
     <div className="w-screen h-screen bg-[#1a202c] text-white overflow-hidden relative font-sans">

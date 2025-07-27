@@ -510,7 +510,6 @@ def log_user_activity():
         app.logger.error(f"Error logging activity: {e}", exc_info=True)
         return jsonify({"message": "Server error while logging activity"}), 500
 
-# ★★★ 修正点: このAPIの内部ロジックをより堅牢なアトミック処理に変更 ★★★
 @app.route('/api/memos_with_map', methods=['POST'])
 @token_required
 def create_memo_with_map():
@@ -525,35 +524,35 @@ def create_memo_with_map():
     try:
         # --- トランザクション開始 ---
         
-        # 1. 新しいメモオブジェクトを作成
+        # 1. 新しいメモオブジェクトを作成し、まずコミットしてIDを取得
         new_memo = Memo(user_id=user_id, content=content)
+        db.session.add(new_memo)
+        db.session.flush()  # IDを取得するためにflushを実行（コミット前）
 
         # 2. 初期マップデータを作成
         initial_map_data = {
             "nodes": [{
-                "id": f"initial-node-{uuid.uuid4().hex}", # IDはユニークであれば良い
+                "id": f"initial-node-{uuid.uuid4().hex}", 
                 "data": {"label": content[:20] or "最初のノード"},
                 "position": {"x": 100, "y": 100}
             }],
             "edges": []
         }
 
-        # 3. 新しいマップ履歴を作成
-        new_history_entry = MapHistory(map_data=initial_map_data)
+        # 3. 新しいマップ履歴を作成（memo_idを明示的に設定）
+        new_history_entry = MapHistory(
+            memo_id=new_memo.id,  # 明示的にmemo_idを設定
+            map_data=initial_map_data
+        )
         
-        # 4. メモの履歴リストに、新しい履歴を追加する
-        #    (Modelの backref='memo' 設定により、new_history_entry.memo に new_memo が自動でセットされる)
-        new_memo.history_entries.append(new_history_entry)
-
-        # 5. メモオブジェクトをセッションに追加
-        #    (Modelの cascade 設定により、関連する new_history_entry も自動で追加・保存される)
-        db.session.add(new_memo)
+        # 4. マップ履歴をセッションに追加
+        db.session.add(new_history_entry)
         
-        # 6. ここまでの全ての変更をアトミックにコミット
+        # 5. 全ての変更をコミット
         db.session.commit()
         # --- トランザクション終了 ---
 
-        # 成功レスポンスを返す (commit後に生成される値も取得)
+        # 成功レスポンスを返す
         return jsonify({
             "memo": {
                 "id": new_memo.id,
