@@ -27,9 +27,10 @@ function DashboardPage() {
   const [isMemoPanelOpen, setIsMemoPanelOpen] = useState(false);
   const [isLoadingData, setIsLoadingData] = useState(true);
   const [layoutTrigger, setLayoutTrigger] = useState(0);
-
+  const [, setIsProcessing] = useState(false);
   const saveTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const [isSaving, setIsSaving] = useState(false);
+  const [memoContent] = useState('');
 
   // ★ 変更点: onConnect ハンドラを追加
   // この関数は、ユーザーがUI上でノードを接続したときにReact Flowによって呼び出される。
@@ -213,26 +214,30 @@ function DashboardPage() {
     return () => { if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current); };
   }, [nodes, edges, currentMemo, isLoadingData, toast]);
 
-  const handleSaveAndGenerate = useCallback(async (text: string) => {
-    if (!text.trim()) {
+
+  // ★★★ 修正点: 新しいサービスを呼び出すように変更 ★★★
+  const handleSaveAndGenerate = useCallback(async () => {
+    if (!memoContent.trim()) {
       toast({ title: "入力エラー", description: "メモ内容が空です。", variant: "destructive" });
       return;
     }
-    loggingService.logActivity('SAVE_AND_GENERATE_MAP', { memoLength: text.length });
+    setIsProcessing(true);
     try {
-      const savedMemo = await memoService.createMemo(text);
-      setCurrentMemo(savedMemo);
-      toast({ title: "成功", description: "メモを保存しました。" });
+      // 1. メモと初期マップの作成を一度にリクエスト
+      const { memo: savedMemo, map: initialMap } = await memoService.createMemoWithMap(memoContent);
       
-      const mapResponse = await mapService.generateMap(savedMemo.id);
-      applyMapData(mapResponse.map_data);
-      toast({ title: "成功", description: "知識マップを生成/更新しました。" });
+      // 2. 返ってきたデータでstateを更新
+      setCurrentMemo(savedMemo);
+      applyMapData(initialMap.map_data);
+      
+      toast({ title: "成功", description: "新しいメモとマップを作成しました。" });
     } catch (error: any) {
-      toast({ title: "処理エラー", description: "マップの生成または保存に失敗しました。", variant: "destructive" });
+      toast({ title: "処理エラー", description: "メモとマップの作成に失敗しました。", variant: "destructive" });
     } finally {
+      setIsProcessing(false);
       setIsMemoPanelOpen(false);
     }
-  }, [toast, applyMapData]);
+  }, [memoContent, toast, applyMapData]);
 
   return (
     <div className="w-screen h-screen bg-[#1a202c] text-white overflow-hidden relative font-sans">

@@ -846,6 +846,63 @@ def get_system_stats():
 
 import uuid # ★ 変更点: UUIDライブラリをインポート
 
+# ★★★ 新規追加: メモと初期マップをアトミックに作成するAPI ★★★
+@app.route('/api/memos_with_map', methods=['POST'])
+@token_required
+def create_memo_with_map():
+    user_id = g.current_user_id
+    data = request.get_json()
+    if not data or not data.get('content'):
+        return jsonify({"message": "Memo content is required"}), 400
+    
+    content = data['content']
+    
+    try:
+        # --- トランザクション開始 ---
+        # 1. 新しいメモオブジェクトを作成
+        new_memo = Memo(user_id=user_id, content=content)
+        db.session.add(new_memo)
+        
+        # flush() を呼び出すことで、コミット前に new_memo.id が確定する
+        db.session.flush()
+
+        # 2. 初期マップデータを作成
+        initial_map_data = {
+            "nodes": [{
+                "id": f"initial-node-{int(datetime.now().timestamp())}",
+                "data": {"label": content[:20] or "最初のノード"},
+                "position": {"x": 100, "y": 100}
+            }],
+            "edges": []
+        }
+
+        # 3. 新しいマップ履歴を作成し、メモに紐付ける
+        new_history_entry = MapHistory(memo_id=new_memo.id, map_data=initial_map_data)
+        db.session.add(new_history_entry)
+
+        # 4. メモとマップ履歴を同時にデータベースにコミット
+        db.session.commit()
+        # --- トランザクション終了 ---
+
+        return jsonify({
+            "memo": {
+                "id": new_memo.id,
+                "content": new_memo.content,
+                "created_at": new_memo.created_at.isoformat()
+            },
+            "map": {
+                "memo_id": new_memo.id,
+                "map_data": initial_map_data,
+                "generated_at": new_history_entry.created_at.isoformat()
+            }
+        }), 201
+
+    except Exception as e:
+        db.session.rollback() # エラーが発生した場合は全ての変更を取り消す
+        app.logger.error(f"Failed to create memo with map: {e}", exc_info=True)
+        return jsonify({"message": "Failed to create memo and map"}), 500
+
+
 @app.route('/api/nodes/create_manual', methods=['POST'])
 @token_required
 def create_manual_node():
