@@ -12,6 +12,7 @@ from functools import wraps
 import pandas as pd
 import jwt
 from sqlalchemy import func, distinct, and_
+import uuid  # この行を追加
 
 # =============================================================================
 # 1. Flask App Setup
@@ -413,12 +414,36 @@ def export_database_csv():
 def health_check():
     """データベース接続の健全性チェック"""
     try:
-        # シンプルなクエリでデータベース接続をテスト
+        # データベース接続テスト
         db.session.execute(db.text('SELECT 1'))
-        return jsonify({"status": "healthy", "database": "connected"}), 200
+        
+        # テーブルの存在確認
+        inspector = db.inspect(db.engine)
+        tables = inspector.get_table_names()
+        
+        # 必要なテーブルの確認
+        required_tables = ['users', 'memos', 'map_history']
+        missing_tables = [table for table in required_tables if table not in tables]
+        
+        health_info = {
+            "status": "healthy" if not missing_tables else "partial",
+            "database": "connected",
+            "tables": tables,
+            "missing_tables": missing_tables
+        }
+        
+        if missing_tables:
+            health_info["warning"] = f"Missing tables: {missing_tables}"
+            
+        return jsonify(health_info), 200
+        
     except Exception as e:
         app.logger.error(f"Health check failed: {e}")
-        return jsonify({"status": "unhealthy", "error": str(e)}), 500
+        return jsonify({
+            "status": "unhealthy", 
+            "error": str(e),
+            "database": "disconnected"
+        }), 500
 
 # ★★★ 修正点: GETとPUTを一つの関数に統合 ★★★
 @app.route('/api/maps/<int:memo_id>', methods=['GET', 'PUT'])
@@ -509,7 +534,6 @@ def log_user_activity():
         db.session.rollback()
         app.logger.error(f"Error logging activity: {e}", exc_info=True)
         return jsonify({"message": "Server error while logging activity"}), 500
-
 @app.route('/api/memos_with_map', methods=['POST'])
 @token_required
 def create_memo_with_map():
@@ -520,15 +544,25 @@ def create_memo_with_map():
         return jsonify({"message": "Memo content is required"}), 400
     
     content = data['content']
+    app.logger.info(f"Creating memo with map for user {user_id}, content length: {len(content)}")
+    
+    new_memo = None
+    new_history_entry = None
     
     try:
-        # --- トランザクション開始 ---
+        # ユーザーの存在確認
+        user = User.query.get(user_id)
+        if not user:
+            app.logger.error(f"User {user_id} not found")
+            return jsonify({"message": "User not found"}), 404
         
-        # 1. 新しいメモオブジェクトを作成し、まずコミットしてIDを取得
+        # 1. 新しいメモオブジェクトを作成
         new_memo = Memo(user_id=user_id, content=content)
         db.session.add(new_memo)
-        db.session.flush()  # IDを取得するためにflushを実行（コミット前）
-
+        db.session.flush()  # IDを取得するためのflush（まだコミットしない）
+        
+        app.logger.info(f"Memo created with ID: {new_memo.id}")
+        
         # 2. 初期マップデータを作成
         initial_map_data = {
             "nodes": [{
@@ -539,18 +573,17 @@ def create_memo_with_map():
             "edges": []
         }
 
-        # 3. 新しいマップ履歴を作成（memo_idを明示的に設定）
+        # 3. 新しいマップ履歴を作成
         new_history_entry = MapHistory(
-            memo_id=new_memo.id,  # 明示的にmemo_idを設定
+            memo_id=new_memo.id,
             map_data=initial_map_data
         )
         
-        # 4. マップ履歴をセッションに追加
         db.session.add(new_history_entry)
         
-        # 5. 全ての変更をコミット
+        # 4. 全ての変更を一括でコミット
         db.session.commit()
-        # --- トランザクション終了 ---
+        app.logger.info(f"Successfully created memo {new_memo.id} and map history {new_history_entry.id}")
 
         # 成功レスポンスを返す
         return jsonify({
@@ -570,8 +603,12 @@ def create_memo_with_map():
         # エラーが発生した場合は、トランザクション内の全ての変更を取り消す
         db.session.rollback() 
         app.logger.error(f"Failed to create memo with map: {e}", exc_info=True)
-        return jsonify({"message": "Failed to create memo and map due to an internal error."}), 500
-
+        
+        # より詳細なエラー情報をログに出力
+        import traceback
+        app.logger.error(f"Full traceback: {traceback.format_exc()}")
+        
+        return jsonify({"message": f"Failed to create memo and map due to internal error"}), 500
 # ★★★ 修正: 既存のマップ生成関数を、履歴追加に特化させる ★★★
 @app.route('/api/memos/<int:memo_id>/generate_map', methods=['POST'])
 @token_required
@@ -1048,10 +1085,31 @@ def get_combined_map():
         return jsonify({"message": "Failed to fetch combined map data"}), 500
 # =============================================================================
 
-
 if __name__ == '__main__':
     with app.app_context():
-        # Create database tables if they don't exist
-        db.create_all()
-        app.logger.info("Database tables checked/created.")
+        try:
+            # データベース接続テスト
+            db.session.execute(db.text('SELECT 1'))
+            app.logger.info("Database connection successful.")
+            
+            # テーブル作成
+            db.create_all()
+            app.logger.info("Database tables checked/created successfully.")
+            
+            # テーブルが正しく作成されたか確認
+            inspector = db.inspect(db.engine)
+            tables = inspector.get_table_names()
+            app.logger.info(f"Available tables: {tables}")
+            
+            # 必要なテーブルの存在確認
+            required_tables = ['users', 'memos', 'map_history']
+            missing_tables = [table for table in required_tables if table not in tables]
+            if missing_tables:
+                app.logger.error(f"Missing required tables: {missing_tables}")
+            else:
+                app.logger.info("All required tables exist.")
+                
+        except Exception as e:
+            app.logger.error(f"Database initialization failed: {e}", exc_info=True)
+            
     app.run(debug=True, port=5001)
