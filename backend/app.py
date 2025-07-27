@@ -1037,11 +1037,6 @@ def get_combined_map():
         return jsonify({"message": "Failed to fetch combined map data"}), 500
 # =============================================================================
 
-# --- アプリケーションの初期化と実行 ---
-with app.app_context():
-    db.create_all()
-    load_allowed_users()
-    app.logger.info("Database tables created (if they didn't exist).")
 
 if __name__ == '__main__':
     with app.app_context():
