@@ -12,8 +12,7 @@ from functools import wraps
 import pandas as pd
 import jwt
 from sqlalchemy import func, distinct, and_
-from gevent import monkey
-monkey.patch_all()
+
 # =============================================================================
 # 1. Flask App Setup
 # =============================================================================
