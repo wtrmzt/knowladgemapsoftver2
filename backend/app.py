@@ -514,7 +514,7 @@ def log_user_activity():
         app.logger.error(f"Error logging activity: {e}", exc_info=True)
         return jsonify({"message": "Server error while logging activity"}), 500
 
-# ★★★ 新規追加: メモと初期マップをアトミックに作成するAPI ★★★
+# ★★★ 修正点: このAPIの内部ロジックをより堅牢な方式に変更 ★★★
 @app.route('/api/memos_with_map', methods=['POST'])
 @token_required
 def create_memo_with_map():
@@ -526,35 +526,46 @@ def create_memo_with_map():
     content = data['content']
     
     try:
-        # --- トランザクション開始 ---
         # 1. 新しいメモオブジェクトを作成
         new_memo = Memo(user_id=user_id, content=content)
-        db.session.add(new_memo)
-        db.session.flush() # これにより、コミット前に new_memo.id が確定する
 
-        # 2. 初期マップデータを作成 (OpenAI呼び出しはここで行うことも可能)
+        # 2. 初期マップデータを作成
         initial_map_data = {
-            "nodes": [{"id": f"initial-node-{new_memo.id}", "data": {"label": content[:20] or "最初のノード"}, "position": {"x": 100, "y": 100}}],
+            "nodes": [{
+                "id": f"initial-node-{int(datetime.now().timestamp())}",
+                "data": {"label": content[:20] or "最初のノード"},
+                "position": {"x": 100, "y": 100}
+            }],
             "edges": []
         }
 
-        # 3. 新しいマップ履歴を作成し、メモに紐付ける
-        new_history_entry = MapHistory(memo_id=new_memo.id, map_data=initial_map_data)
-        db.session.add(new_history_entry)
+        # 3. 新しいマップ履歴を作成し、メモの履歴リストに追加
+        new_history_entry = MapHistory(map_data=initial_map_data)
+        new_memo.history_entries.append(new_history_entry)
 
-        # 4. メモとマップ履歴を同時にデータベースにコミット
+        # 4. メモオブジェクトをセッションに追加
+        #    (SQLAlchemyが親子関係を理解し、両方を正しく保存してくれる)
+        db.session.add(new_memo)
         db.session.commit()
-        # --- トランザクション終了 ---
 
         return jsonify({
-            "memo": { "id": new_memo.id, "content": new_memo.content, "created_at": new_memo.created_at.isoformat() },
-            "map": { "memo_id": new_memo.id, "map_data": initial_map_data, "generated_at": new_history_entry.created_at.isoformat() }
+            "memo": {
+                "id": new_memo.id,
+                "content": new_memo.content,
+                "created_at": new_memo.created_at.isoformat()
+            },
+            "map": {
+                "memo_id": new_memo.id,
+                "map_data": initial_map_data,
+                "generated_at": new_history_entry.created_at.isoformat()
+            }
         }), 201
 
     except Exception as e:
         db.session.rollback() # エラーが発生した場合は全ての変更を取り消す
         app.logger.error(f"Failed to create memo with map: {e}", exc_info=True)
         return jsonify({"message": "Failed to create memo and map"}), 500
+
 
 # ★★★ 修正: 既存のマップ生成関数を、履歴追加に特化させる ★★★
 @app.route('/api/memos/<int:memo_id>/generate_map', methods=['POST'])
