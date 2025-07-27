@@ -13,6 +13,8 @@ import pandas as pd
 import jwt
 from sqlalchemy import func, distinct, and_
 import uuid  # この行を追加
+from gevent import monkey
+monkey.patch_all()  # geventのパッチを適用
 
 # =============================================================================
 # 1. Flask App Setup
