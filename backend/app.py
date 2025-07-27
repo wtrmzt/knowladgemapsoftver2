@@ -466,25 +466,21 @@ def handle_single_map(memo_id):
 @app.route('/api/memos', methods=['GET', 'POST'])
 @token_required
 def handle_memos():
-    # @token_requiredデコレータによってg.current_user_idにユーザーIDがセットされる
     user_id = g.current_user_id
-
-    # POSTリクエスト（新しいメモの作成）
     if request.method == 'POST':
         data = request.get_json()
         if not data or not data.get('content'): 
             return jsonify({"message": "Memo content is required"}), 400
         
-        # user_idを使って新しいMemoオブジェクトを作成
+        # このエンドポイントはメモ単体で作成するため、アトミック化の対象外
         memo = Memo(user_id=user_id, content=data['content'])
         db.session.add(memo)
         db.session.commit()
         return jsonify({"id": memo.id, "content": memo.content, "created_at": memo.created_at.isoformat()}), 201
     
-    # GETリクエスト（メモ一覧の取得）
-    # user_idを使って、そのユーザーのメモのみを取得
     memos = Memo.query.filter_by(user_id=user_id).order_by(Memo.created_at.desc()).all()
     return jsonify([{"id": m.id, "content": m.content, "created_at": m.created_at.isoformat()} for m in memos]), 200
+
 
 # ★★★ 修正: 重複を削除し、ここに一つだけ定義 ★★★
 @app.route('/api/log_activity', methods=['POST'])
@@ -514,10 +510,11 @@ def log_user_activity():
         app.logger.error(f"Error logging activity: {e}", exc_info=True)
         return jsonify({"message": "Server error while logging activity"}), 500
 
-# ★★★ 修正点: このAPIの内部ロジックをより堅牢な方式に変更 ★★★
+# ★★★ 修正点: このAPIの内部ロジックをより堅牢なアトミック処理に変更 ★★★
 @app.route('/api/memos_with_map', methods=['POST'])
 @token_required
 def create_memo_with_map():
+    """メモと初期マップを単一のトランザクションでアトミックに作成する"""
     user_id = g.current_user_id
     data = request.get_json()
     if not data or not data.get('content'):
@@ -526,28 +523,37 @@ def create_memo_with_map():
     content = data['content']
     
     try:
+        # --- トランザクション開始 ---
+        
         # 1. 新しいメモオブジェクトを作成
         new_memo = Memo(user_id=user_id, content=content)
 
         # 2. 初期マップデータを作成
         initial_map_data = {
             "nodes": [{
-                "id": f"initial-node-{int(datetime.now().timestamp())}",
+                "id": f"initial-node-{uuid.uuid4().hex}", # IDはユニークであれば良い
                 "data": {"label": content[:20] or "最初のノード"},
                 "position": {"x": 100, "y": 100}
             }],
             "edges": []
         }
 
-        # 3. 新しいマップ履歴を作成し、メモの履歴リストに追加
+        # 3. 新しいマップ履歴を作成
         new_history_entry = MapHistory(map_data=initial_map_data)
+        
+        # 4. メモの履歴リストに、新しい履歴を追加する
+        #    (Modelの backref='memo' 設定により、new_history_entry.memo に new_memo が自動でセットされる)
         new_memo.history_entries.append(new_history_entry)
 
-        # 4. メモオブジェクトをセッションに追加
-        #    (SQLAlchemyが親子関係を理解し、両方を正しく保存してくれる)
+        # 5. メモオブジェクトをセッションに追加
+        #    (Modelの cascade 設定により、関連する new_history_entry も自動で追加・保存される)
         db.session.add(new_memo)
+        
+        # 6. ここまでの全ての変更をアトミックにコミット
         db.session.commit()
+        # --- トランザクション終了 ---
 
+        # 成功レスポンスを返す (commit後に生成される値も取得)
         return jsonify({
             "memo": {
                 "id": new_memo.id,
@@ -562,10 +568,10 @@ def create_memo_with_map():
         }), 201
 
     except Exception as e:
-        db.session.rollback() # エラーが発生した場合は全ての変更を取り消す
+        # エラーが発生した場合は、トランザクション内の全ての変更を取り消す
+        db.session.rollback() 
         app.logger.error(f"Failed to create memo with map: {e}", exc_info=True)
-        return jsonify({"message": "Failed to create memo and map"}), 500
-
+        return jsonify({"message": "Failed to create memo and map due to an internal error."}), 500
 
 # ★★★ 修正: 既存のマップ生成関数を、履歴追加に特化させる ★★★
 @app.route('/api/memos/<int:memo_id>/generate_map', methods=['POST'])
