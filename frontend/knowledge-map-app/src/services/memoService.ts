@@ -1,5 +1,5 @@
 import apiClient from './apiClient';
-import type { Memo,KnowledgeMap } from '../types';
+import type { Memo } from '../types';
 
 export const memoService = {
   createMemo: async (content: string): Promise<Memo> => {
