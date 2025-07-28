@@ -520,58 +520,85 @@ def log_user_activity():
         app.logger.error(f"Error logging activity: {e}", exc_info=True)
         return jsonify({"message": "Server error while logging activity"}), 500
     
+# ★★★ 修正: この関数をAIマップ生成ロジックと統合 ★★★
 @app.route('/api/memos_with_map', methods=['POST'])
 @token_required
 def create_memo_with_map():
-    """メモと初期マップを単一のトランザクションでアトミックに作成する"""
+    """メモを作成し、AIでナレッジマップを生成し、単一トランザクションで保存する"""
     user_id = g.current_user_id
     data = request.get_json()
     if not data or not data.get('content'):
         return jsonify({"message": "Memo content is required"}), 400
     
     content = data['content']
-    app.logger.info(f"Creating memo with map for user {user_id}, content length: {len(content)}")
+    app.logger.info(f"Attempting to create memo and AI map for user {user_id}.")
+
+    # --- AIによるマップデータ生成 ---
+    map_data = None
+    if OPENAI_API_KEY:
+        try:
+            app.logger.info("Calling OpenAI API to generate map...")
+            prompt_text = f"""
+            入力された生徒の振り返り記述から、学習内容の理解を深めるための知識マップを生成してください。
+            - 振り返りの中心となる重要な概念を5つ以内のノードとして抽出します。
+            - 各ノードには、140字以内で簡潔な説明文（sentence）を生成します。
+            - ノード間の関連性をエッジとして定義します。
+            - 出力は必ず以下のJSON形式に従ってください。
+            {{
+              "nodes": [
+                {{"id": "unique_id_1", "label": "ノード名1", "sentence": "説明文1"}},
+                {{"id": "unique_id_2", "label": "ノード名2", "sentence": "説明文2"}}
+              ],
+              "edges": [
+                {{"source": "unique_id_1", "target": "unique_id_2"}}
+              ]
+            }}
+            入力:
+            ---
+            {content}
+            ---
+            """
+            client = openai.OpenAI(api_key=OPENAI_API_KEY)
+            chat_completion = client.chat.completions.create(
+                messages=[
+                    {"role": "system", "content": "あなたは優秀な教員アシスタントで、与えられたテキストから知識マップをJSON形式で生成します。"},
+                    {"role": "user", "content": prompt_text}
+                ],
+                model="gpt-4o",
+                response_format={"type": "json_object"},
+                temperature=0.2
+            )
+            response_content = chat_completion.choices[0].message.content
+            map_data = json.loads(response_content)
+            app.logger.info("Successfully generated map from OpenAI.")
+        except Exception as e:
+            app.logger.error(f"OpenAI API Error: {e}", exc_info=True)
+            # APIエラー時はフォールバックするため、処理を続行
+            map_data = None
     
-    new_memo = None
-    new_history_entry = None
-    
-    try:
-        # ユーザーの存在確認
-        user = User.query.get(user_id)
-        if not user:
-            app.logger.error(f"User {user_id} not found")
-            return jsonify({"message": "User not found"}), 404
-        
-        # 1. 新しいメモオブジェクトを作成
-        new_memo = Memo(user_id=user_id, content=content)
-        db.session.add(new_memo)
-        db.session.flush()  # IDを取得するためのflush（まだコミットしない）
-        
-        app.logger.info(f"Memo created with ID: {new_memo.id}")
-        
-        # 2. 初期マップデータを作成
-        initial_map_data = {
+    # APIキーがない、またはAPI呼び出しに失敗した場合のフォールバック処理
+    if map_data is None:
+        app.logger.warning("Falling back to initial placeholder map.")
+        map_data = {
             "nodes": [{
                 "id": f"initial-node-{uuid.uuid4().hex}", 
-                "data": {"label": content[:20] or "最初のノード"},
+                "data": {"label": content[:30] or "最初のノード"}, # フロントエンドの構造に合わせてdataプロパティを追加
                 "position": {"x": 100, "y": 100}
             }],
             "edges": []
         }
 
-        # 3. 新しいマップ履歴を作成
-        new_history_entry = MapHistory(
-            memo_id=new_memo.id,
-            map_data=initial_map_data
-        )
+    # --- データベースへのアトミックな保存 ---
+    try:
+        new_memo = Memo(user_id=user_id, content=content)
+        new_history_entry = MapHistory(map_data=map_data)
+        new_memo.history_entries.append(new_history_entry)
         
-        db.session.add(new_history_entry)
-        
-        # 4. 全ての変更を一括でコミット
+        db.session.add(new_memo)
         db.session.commit()
-        app.logger.info(f"Successfully created memo {new_memo.id} and map history {new_history_entry.id}")
+        
+        app.logger.info(f"Successfully created memo {new_memo.id} and map history {new_history_entry.id} in DB.")
 
-        # 成功レスポンスを返す
         return jsonify({
             "memo": {
                 "id": new_memo.id,
@@ -580,21 +607,16 @@ def create_memo_with_map():
             },
             "map": {
                 "memo_id": new_memo.id,
-                "map_data": initial_map_data,
+                "map_data": map_data,
                 "generated_at": new_history_entry.created_at.isoformat()
             }
         }), 201
 
     except Exception as e:
-        # エラーが発生した場合は、トランザクション内の全ての変更を取り消す
         db.session.rollback() 
-        app.logger.error(f"Failed to create memo with map: {e}", exc_info=True)
-        
-        # より詳細なエラー情報をログに出力
-        import traceback
-        app.logger.error(f"Full traceback: {traceback.format_exc()}")
-        
-        return jsonify({"message": f"Failed to create memo and map due to internal error"}), 500
+        app.logger.error(f"Database error during memo/map creation: {e}", exc_info=True)
+        return jsonify({"message": "Database transaction failed."}), 500
+    
 # ★★★ 修正: 既存のマップ生成関数を、履歴追加に特化させる ★★★
 @app.route('/api/memos/<int:memo_id>/generate_map', methods=['POST'])
 @token_required
@@ -658,7 +680,6 @@ def generate_map_for_memo(memo_id):
         new_history_entry = MapHistory(memo_id=memo_id, map_data=map_data_to_save)
         db.session.add(new_history_entry)
         db.session.commit()
-        
         return jsonify({
             "memo_id": memo_id, 
             "map_data": map_data_to_save, 
