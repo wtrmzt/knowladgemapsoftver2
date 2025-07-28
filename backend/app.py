@@ -115,6 +115,7 @@ def load_allowed_users():
     except Exception as e:
         app.logger.error(f"Failed to load allowed users: {e}")
 
+# --- ユーザー認証のセットアップ ---
 def token_required(f):
     @wraps(f)
     def decorated(*args, **kwargs):
@@ -126,13 +127,11 @@ def token_required(f):
         try:
             data = jwt.decode(token, app.config['SECRET_KEY'], algorithms=["HS256"])
             g.current_user_id = data['user_id']
-            # ★★★ トークンに管理者フラグがあれば、gオブジェクトにセット ★★★
             g.is_admin = data.get('is_admin', False) 
         except Exception as e: return jsonify({'message': f'Token is invalid: {str(e)}'}), 401
         return f(*args, **kwargs)
     return decorated
 
-# ★★★ 管理者専用APIのためのデコレータを新設 ★★★
 def admin_required(f):
     @wraps(f)
     @token_required
@@ -166,7 +165,6 @@ def login():
             db.session.add(user)
             db.session.commit()
         
-        # ★★★ ログインユーザーが管理者か判定し、トークンに権限情報を追加 ★★★
         is_admin = (username == app.config['ADMIN_USERNAME'])
         
         token_payload = {
@@ -179,6 +177,7 @@ def login():
         return jsonify({"token": jwt_token, "is_admin": is_admin}), 200
     except Exception as e:
         db.session.rollback()
+        app.logger.error(f"Login error: {e}", exc_info=True)
         return jsonify({"message": "Server error during login"}), 500
 
 
@@ -190,8 +189,7 @@ from sqlalchemy.dialects.postgresql import UUID
 import uuid
 
 class User(db.Model):
-    __tablename__ = 'users'  # テーブル名を明示的に指定
-    
+    __tablename__ = 'users'
     id = db.Column(db.Integer, primary_key=True)
     username = db.Column(db.String(80), unique=True, nullable=False, index=True)
     created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
@@ -200,7 +198,6 @@ class User(db.Model):
 
 class Memo(db.Model):
     __tablename__ = 'memos'
-    
     id = db.Column(db.Integer, primary_key=True)
     user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False, index=True)
     content = db.Column(db.Text, nullable=False)
@@ -209,23 +206,13 @@ class Memo(db.Model):
 
 class MapHistory(db.Model):
     __tablename__ = 'map_history'
-    
     id = db.Column(db.Integer, primary_key=True)
     memo_id = db.Column(db.Integer, db.ForeignKey('memos.id'), nullable=False, index=True)
-    map_data = db.Column(db.JSON, nullable=False)  # PostgreSQLのJSONB型が自動選択される
-    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False, index=True)
-
-class KnowledgeMap(db.Model):
-    __tablename__ = 'knowledge_maps'
-    
-    id = db.Column(db.Integer, primary_key=True)
-    memo_id = db.Column(db.Integer, db.ForeignKey('memos.id'), nullable=False, unique=True)
     map_data = db.Column(db.JSON, nullable=False)
-    generated_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False, index=True)
 
 class UserActivityLog(db.Model):
     __tablename__ = 'user_activity_logs'
-    
     id = db.Column(db.Integer, primary_key=True)
     user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False, index=True)
     activity_type = db.Column(db.String(100), nullable=False, index=True)
@@ -264,8 +251,6 @@ def _build_cors_preflight_response():
 # =============================================================================
 # 4. API Endpoints
 # =============================================================================
-
-
 
 # 3. データベース初期化とマイグレーション用の関数
 def init_database():
@@ -499,7 +484,6 @@ def handle_memos():
         if not data or not data.get('content'): 
             return jsonify({"message": "Memo content is required"}), 400
         
-        # このエンドポイントはメモ単体で作成するため、アトミック化の対象外
         memo = Memo(user_id=user_id, content=data['content'])
         db.session.add(memo)
         db.session.commit()
@@ -507,7 +491,6 @@ def handle_memos():
     
     memos = Memo.query.filter_by(user_id=user_id).order_by(Memo.created_at.desc()).all()
     return jsonify([{"id": m.id, "content": m.content, "created_at": m.created_at.isoformat()} for m in memos]), 200
-
 
 # ★★★ 修正: 重複を削除し、ここに一つだけ定義 ★★★
 @app.route('/api/log_activity', methods=['POST'])
@@ -536,6 +519,7 @@ def log_user_activity():
         db.session.rollback()
         app.logger.error(f"Error logging activity: {e}", exc_info=True)
         return jsonify({"message": "Server error while logging activity"}), 500
+    
 @app.route('/api/memos_with_map', methods=['POST'])
 @token_required
 def create_memo_with_map():
@@ -1087,9 +1071,11 @@ def get_combined_map():
         return jsonify({"message": "Failed to fetch combined map data"}), 500
 # =============================================================================
 
+# ★★★ 修正点: アプリケーション起動時にテーブルを自動作成する処理 ★★★
+with app.app_context():
+    db.create_all()
+    app.logger.info("Database tables checked and created on startup if they didn't exist.")
+
 if __name__ == '__main__':
-    with app.app_context():
-        # Create database tables if they don't exist
-        db.create_all()
-        app.logger.info("Database tables checked/created.")
+    # ローカルでの実行時にもテーブルが作成される
     app.run(debug=True, port=5001)
