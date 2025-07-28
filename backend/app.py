@@ -1089,29 +1089,7 @@ def get_combined_map():
 
 if __name__ == '__main__':
     with app.app_context():
-        try:
-            # データベース接続テスト
-            db.session.execute(db.text('SELECT 1'))
-            app.logger.info("Database connection successful.")
-            
-            # テーブル作成
-            db.create_all()
-            app.logger.info("Database tables checked/created successfully.")
-            
-            # テーブルが正しく作成されたか確認
-            inspector = db.inspect(db.engine)
-            tables = inspector.get_table_names()
-            app.logger.info(f"Available tables: {tables}")
-            
-            # 必要なテーブルの存在確認
-            required_tables = ['users', 'memos', 'map_history']
-            missing_tables = [table for table in required_tables if table not in tables]
-            if missing_tables:
-                app.logger.error(f"Missing required tables: {missing_tables}")
-            else:
-                app.logger.info("All required tables exist.")
-                
-        except Exception as e:
-            app.logger.error(f"Database initialization failed: {e}", exc_info=True)
-            
+        # Create database tables if they don't exist
+        db.create_all()
+        app.logger.info("Database tables checked/created.")
     app.run(debug=True, port=5001)
