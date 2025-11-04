@@ -1,4 +1,14 @@
 # gunicorn.conf.py
+import os
+
+# Renderの環境変数 $PORT を読み込む。
+# ローカルテスト用にデフォルト値 (例: 8000) を設定することも可能
+port = os.environ.get('PORT', '8000')
+
+# Gunicornがリッスンするホストとポートを指定
+# Renderでは '0.0.0.0' でバインドする必要があります
+bind = f'0.0.0.0:{port}'
+
 
 # ワーカープロセスの数を指定
 workers = 4
