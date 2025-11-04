@@ -971,6 +971,7 @@ def create_manual_node():
         prompt_text = f"""
         与えられたトピック「{node_label}」について、学習のための情報を生成してください。
         以下のJSONオブジェクト形式で、オブジェクト単体を返してください:
+        ・出力と説明文は英語で行うこと
         {{
           "id": "manual_{str(uuid.uuid4())}",
           "label": "{node_label}",
