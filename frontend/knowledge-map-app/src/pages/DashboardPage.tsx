@@ -79,7 +79,7 @@ function DashboardPage() {
 
       // 作成したノードを既存のノードリストに追加して、画面を更新
       setNodes((nds) => [...nds, newNode]);
-      toast({ title: "成功", description: `ノード「${label}」を追加しました。` });
+      toast({ title: "Successfully", description: `Add Node「${label}」` });// ユーザーに成功を通知
       loggingService.logActivity('MANUAL_ADD_NODE_SUCCESS', { nodeId: newNode.id, label: newNode.data.label });
 
     } catch (error: any) {
@@ -235,7 +235,7 @@ const handleSaveAndGenerate = useCallback(async (text: string) => {
     setCurrentMemo(savedMemo);
     applyMapData(initialMap.map_data);
     
-    toast({ title: "成功", description: "新しいメモとマップを作成しました。" });
+    toast({ title: "Successfully", description: "Created New Memo and Map" });// ユーザーに成功を通知
     
   } catch (error: any) {
     console.error('handleSaveAndGenerate error:', error);
@@ -293,7 +293,7 @@ const handleSaveAndGenerate = useCallback(async (text: string) => {
       <aside className={`absolute top-0 left-0 h-full w-[400px] bg-gray-900/80 backdrop-blur-md border-r border-blue-400/20 shadow-2xl transition-transform duration-500 ease-in-out z-30 ${isMemoPanelOpen ? 'translate-x-0' : '-translate-x-full'}`}>
         <div className="p-6 h-full flex flex-col">
           <div className="flex justify-between items-center mb-4">
-            <h2 className="text-xl font-bold flex items-center"><Brain className="mr-2"/>ActivityReportの下書き</h2>
+            <h2 className="text-xl font-bold flex items-center"><Brain className="mr-2"/>Reflection Sheet</h2>// メモパネルのタイトル
             <Button onClick={() => setIsMemoPanelOpen(false)} variant="ghost" size="icon"><X className="w-6 h-6" /></Button>
           </div>
           <div className="flex-grow flex flex-col min-h-0">

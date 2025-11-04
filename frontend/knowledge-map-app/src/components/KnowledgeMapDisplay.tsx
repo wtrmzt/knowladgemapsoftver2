@@ -291,7 +291,7 @@ const TemporalMapSheetContent: React.FC<{
     return (
         <Sheet open={isOpen} onOpenChange={onOpenChange}>
             <SheetContent className="w-[90vw] sm:max-w-3xl">
-                <SheetHeader><SheetTitle>「{baseNode?.data.label}」の科目の関連</SheetTitle></SheetHeader>
+                <SheetHeader><SheetTitle>Subjects related to"{baseNode?.data.label}"</SheetTitle></SheetHeader>
                 <div className="h-[calc(100vh-160px)] my-4 border rounded-md">
                     {isLoading ? (
                         <div className="flex justify-center items-center h-full">
@@ -304,10 +304,10 @@ const TemporalMapSheetContent: React.FC<{
                     )}
                 </div>
                 <SheetFooter>
-                    <SheetClose asChild><Button variant="outline">閉じる</Button></SheetClose>
+                    <SheetClose asChild><Button variant="outline">Close</Button></SheetClose>
                     <Button onClick={handleApply} disabled={isLoading || !temporalMapData}>
                         <CornerUpRight className="mr-2 h-4 w-4" />
-                        メインのマップに反映
+                        Reflected on the main map
                     </Button>
                 </SheetFooter>
             </SheetContent>
@@ -336,7 +336,7 @@ const ManualNodeAdder: React.FC<{
     // ★ 変更点: フォーム全体のスタイルを調整
     <form onSubmit={handleSubmit} className="absolute top-4 left-4 z-10 flex items-center gap-2 p-2 bg-gray-900/80 backdrop-blur-sm rounded-lg border border-gray-700 shadow-lg">
       <Input 
-        placeholder="新しいノード名..." 
+        placeholder="New Node Name..." 
         value={label}
         onChange={(e) => setLabel(e.target.value)}
         // ★ 変更点: 背景色、文字色、プレースホルダー色を明示的に指定して視認性を確保
@@ -426,7 +426,7 @@ function KnowledgeMapDisplay(props: KnowledgeMapDisplayProps) {
             };
             
             onNodeAdded(null, newEdge); 
-            toast({ title: "接続しました", description: `既存のノード「${existingNode.data.label}」に接続しました。` });
+            toast({ title: "Connected!", description: `Connected for node "${existingNode.data.label}"` });
 
         } else {
             loggingService.logActivity('ADD_SUGGESTED_NODE', { 
@@ -464,8 +464,8 @@ function KnowledgeMapDisplay(props: KnowledgeMapDisplayProps) {
 
             onNodeAdded(newNode, newEdge);
             toast({ 
-                title: "追加しました", 
-                description: `ノード「${suggestedNode.label}」を${type === 'learned' ? '学習済み' : '興味あり'}として追加しました。` 
+                title: "Added!", 
+                description: `Added node ${suggestedNode.label}${type === 'learned' ? 'Learned' : 'interested'}` 
             });
         }
     }, [selectedNode, nodeLabelMap, onNodeAdded, toast]);
@@ -488,8 +488,8 @@ function KnowledgeMapDisplay(props: KnowledgeMapDisplayProps) {
                 <SheetContent className="sm:max-w-md w-[90vw] md:w-[400px] z-[100] flex flex-col">
                     <SheetHeader>
                         <SheetTitle>
-                            {sheetViewMode === 'nodeDetail' && 'ノード情報'}
-                            {sheetViewMode !== 'nodeDetail' && `「${selectedNode?.data?.label}」の関連情報`}
+                            {sheetViewMode === 'nodeDetail' && 'Node Details'}
+                            {sheetViewMode !== 'nodeDetail' && `「${selectedNode?.data?.label}」 Related Suggestions`}
                         </SheetTitle>
                         <SheetClose className="absolute right-4 top-4 rounded-sm opacity-70 ring-offset-background transition-opacity hover:opacity-100 focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 disabled:pointer-events-none data-[state=open]:bg-secondary">
                             <X className="h-4 w-4" />
@@ -499,7 +499,7 @@ function KnowledgeMapDisplay(props: KnowledgeMapDisplayProps) {
                             <Button variant="outline" className="w-full" asChild>
                                 <a href={`https://www.google.com/search?q=${encodeURIComponent(selectedNode?.data?.label ?? "")}`} target="_blank" rel="noopener noreferrer">
                                     <ExternalLink className="h-4 w-4 mr-2" />
-                                    Googleで「{selectedNode?.data?.label}」を検索
+                                    Search for Google {selectedNode?.data?.label}
                                 </a>
                             </Button>
                             
@@ -510,7 +510,7 @@ function KnowledgeMapDisplay(props: KnowledgeMapDisplayProps) {
                                 <p className="text-sm text-muted-foreground mt-2">{selectedNode.data.sentence}</p>
                             </div>
                             <SheetFooter className="flex-col sm:flex-col sm:space-x-0 space-y-2">
-                                <Button variant="outline" onClick={handleFetchSuggestions}><Search className="h-4 w-4 mr-2" />関連情報を検索</Button>
+                                <Button variant="outline" onClick={handleFetchSuggestions}><Search className="h-4 w-4 mr-2" />Search related node</Button>
                                 <Button variant="outline" onClick={handleFetchTemporalNodes}><History className="h-4 w-4 mr-2" />電通大の科目と接続</Button>
                             </SheetFooter>
                         </div>
@@ -534,7 +534,7 @@ function KnowledgeMapDisplay(props: KnowledgeMapDisplayProps) {
                                                         {isAdded && (
                                                             <div className="flex items-center text-sm text-muted-foreground">
                                                                 <CheckCircle className="h-4 w-4 mr-1.5 text-green-500" />
-                                                                <span>追加済</span>
+                                                                <span>Added</span>
                                                             </div>
                                                         )}
                                                     </div>
@@ -542,11 +542,11 @@ function KnowledgeMapDisplay(props: KnowledgeMapDisplayProps) {
                                                       <div className="mt-2 pt-2 border-t border-dashed flex justify-end items-center gap-2">
                                                           <Button variant="outline" size="sm" className="text-green-700 border-green-200 hover:bg-green-50 hover:text-green-800" onClick={() => handleSuggestionClick(sNode, 'learned')}>
                                                               <BrainCircuit className="h-4 w-4 mr-1.5" />
-                                                              学習した
+                                                                Learned
                                                           </Button>
                                                           <Button variant="outline" size="sm" className="text-amber-700 border-amber-200 hover:bg-amber-50 hover:text-amber-800" onClick={() => handleSuggestionClick(sNode, 'interested')}>
                                                               <Sparkles className="h-4 w-4 mr-1.5" />
-                                                              興味ある
+                                                                Interested
                                                           </Button>
                                                       </div>
                                                     )}
@@ -557,7 +557,7 @@ function KnowledgeMapDisplay(props: KnowledgeMapDisplayProps) {
                                 ) : <p className="text-sm text-center text-muted-foreground py-10">関連候補は見つかりませんでした。</p>}
                                 </div>
                             </ScrollArea>
-                            <SheetFooter className="pt-4 border-t"><Button variant="outline" onClick={() => setSheetViewMode('nodeDetail')} className="w-full"><ArrowLeft className="h-4 w-4 mr-2" />詳細に戻る</Button></SheetFooter>
+                            <SheetFooter className="pt-4 border-t"><Button variant="outline" onClick={() => setSheetViewMode('nodeDetail')} className="w-full"><ArrowLeft className="h-4 w-4 mr-2" />Return details</Button></SheetFooter>
                         </div>
                     )}
                 </SheetContent>

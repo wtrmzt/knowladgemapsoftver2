@@ -12,9 +12,6 @@ from functools import wraps
 import pandas as pd
 import jwt
 from sqlalchemy import func, distinct, and_
-import uuid  # この行を追加
-from gevent import monkey
-monkey.patch_all()  # geventのパッチを適用
 
 # =============================================================================
 # 1. Flask App Setup
@@ -115,7 +112,6 @@ def load_allowed_users():
     except Exception as e:
         app.logger.error(f"Failed to load allowed users: {e}")
 
-# --- ユーザー認証のセットアップ ---
 def token_required(f):
     @wraps(f)
     def decorated(*args, **kwargs):
@@ -127,11 +123,13 @@ def token_required(f):
         try:
             data = jwt.decode(token, app.config['SECRET_KEY'], algorithms=["HS256"])
             g.current_user_id = data['user_id']
+            # ★★★ トークンに管理者フラグがあれば、gオブジェクトにセット ★★★
             g.is_admin = data.get('is_admin', False) 
         except Exception as e: return jsonify({'message': f'Token is invalid: {str(e)}'}), 401
         return f(*args, **kwargs)
     return decorated
 
+# ★★★ 管理者専用APIのためのデコレータを新設 ★★★
 def admin_required(f):
     @wraps(f)
     @token_required
@@ -165,6 +163,7 @@ def login():
             db.session.add(user)
             db.session.commit()
         
+        # ★★★ ログインユーザーが管理者か判定し、トークンに権限情報を追加 ★★★
         is_admin = (username == app.config['ADMIN_USERNAME'])
         
         token_payload = {
@@ -177,7 +176,6 @@ def login():
         return jsonify({"token": jwt_token, "is_admin": is_admin}), 200
     except Exception as e:
         db.session.rollback()
-        app.logger.error(f"Login error: {e}", exc_info=True)
         return jsonify({"message": "Server error during login"}), 500
 
 
@@ -189,7 +187,8 @@ from sqlalchemy.dialects.postgresql import UUID
 import uuid
 
 class User(db.Model):
-    __tablename__ = 'users'
+    __tablename__ = 'users'  # テーブル名を明示的に指定
+    
     id = db.Column(db.Integer, primary_key=True)
     username = db.Column(db.String(80), unique=True, nullable=False, index=True)
     created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
@@ -198,6 +197,7 @@ class User(db.Model):
 
 class Memo(db.Model):
     __tablename__ = 'memos'
+    
     id = db.Column(db.Integer, primary_key=True)
     user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False, index=True)
     content = db.Column(db.Text, nullable=False)
@@ -206,13 +206,23 @@ class Memo(db.Model):
 
 class MapHistory(db.Model):
     __tablename__ = 'map_history'
+    
     id = db.Column(db.Integer, primary_key=True)
     memo_id = db.Column(db.Integer, db.ForeignKey('memos.id'), nullable=False, index=True)
-    map_data = db.Column(db.JSON, nullable=False)
+    map_data = db.Column(db.JSON, nullable=False)  # PostgreSQLのJSONB型が自動選択される
     created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False, index=True)
+
+class KnowledgeMap(db.Model):
+    __tablename__ = 'knowledge_maps'
+    
+    id = db.Column(db.Integer, primary_key=True)
+    memo_id = db.Column(db.Integer, db.ForeignKey('memos.id'), nullable=False, unique=True)
+    map_data = db.Column(db.JSON, nullable=False)
+    generated_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
 
 class UserActivityLog(db.Model):
     __tablename__ = 'user_activity_logs'
+    
     id = db.Column(db.Integer, primary_key=True)
     user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False, index=True)
     activity_type = db.Column(db.String(100), nullable=False, index=True)
@@ -251,6 +261,8 @@ def _build_cors_preflight_response():
 # =============================================================================
 # 4. API Endpoints
 # =============================================================================
+
+
 
 # 3. データベース初期化とマイグレーション用の関数
 def init_database():
@@ -401,36 +413,12 @@ def export_database_csv():
 def health_check():
     """データベース接続の健全性チェック"""
     try:
-        # データベース接続テスト
+        # シンプルなクエリでデータベース接続をテスト
         db.session.execute(db.text('SELECT 1'))
-        
-        # テーブルの存在確認
-        inspector = db.inspect(db.engine)
-        tables = inspector.get_table_names()
-        
-        # 必要なテーブルの確認
-        required_tables = ['users', 'memos', 'map_history']
-        missing_tables = [table for table in required_tables if table not in tables]
-        
-        health_info = {
-            "status": "healthy" if not missing_tables else "partial",
-            "database": "connected",
-            "tables": tables,
-            "missing_tables": missing_tables
-        }
-        
-        if missing_tables:
-            health_info["warning"] = f"Missing tables: {missing_tables}"
-            
-        return jsonify(health_info), 200
-        
+        return jsonify({"status": "healthy", "database": "connected"}), 200
     except Exception as e:
         app.logger.error(f"Health check failed: {e}")
-        return jsonify({
-            "status": "unhealthy", 
-            "error": str(e),
-            "database": "disconnected"
-        }), 500
+        return jsonify({"status": "unhealthy", "error": str(e)}), 500
 
 # ★★★ 修正点: GETとPUTを一つの関数に統合 ★★★
 @app.route('/api/maps/<int:memo_id>', methods=['GET', 'PUT'])
@@ -478,19 +466,26 @@ def handle_single_map(memo_id):
 @app.route('/api/memos', methods=['GET', 'POST'])
 @token_required
 def handle_memos():
+    # @token_requiredデコレータによってg.current_user_idにユーザーIDがセットされる
     user_id = g.current_user_id
+
+    # POSTリクエスト（新しいメモの作成）
     if request.method == 'POST':
         data = request.get_json()
         if not data or not data.get('content'): 
             return jsonify({"message": "Memo content is required"}), 400
         
+        # user_idを使って新しいMemoオブジェクトを作成
         memo = Memo(user_id=user_id, content=data['content'])
         db.session.add(memo)
         db.session.commit()
         return jsonify({"id": memo.id, "content": memo.content, "created_at": memo.created_at.isoformat()}), 201
     
+    # GETリクエスト（メモ一覧の取得）
+    # user_idを使って、そのユーザーのメモのみを取得
     memos = Memo.query.filter_by(user_id=user_id).order_by(Memo.created_at.desc()).all()
     return jsonify([{"id": m.id, "content": m.content, "created_at": m.created_at.isoformat()} for m in memos]), 200
+
 
 # ★★★ 修正: 重複を削除し、ここに一つだけ定義 ★★★
 @app.route('/api/log_activity', methods=['POST'])
@@ -519,177 +514,126 @@ def log_user_activity():
         db.session.rollback()
         app.logger.error(f"Error logging activity: {e}", exc_info=True)
         return jsonify({"message": "Server error while logging activity"}), 500
-    
-# ★★★ 修正: この関数をAIマップ生成ロジックと統合 ★★★
-@app.route('/api/memos_with_map', methods=['POST'])
-@token_required
-def create_memo_with_map():
-    """メモを作成し、AIでナレッジマップを生成し、単一トランザクションで保存する"""
-    user_id = g.current_user_id
-    data = request.get_json()
-    if not data or not data.get('content'):
-        return jsonify({"message": "Memo content is required"}), 400
-    
-    content = data['content']
-    app.logger.info(f"Attempting to create memo and AI map for user {user_id}.")
 
-    # --- AIによるマップデータ生成 ---
-    map_data = None
-    if OPENAI_API_KEY:
-        try:
-            app.logger.info("Calling OpenAI API to generate map...")
-            prompt_text = f"""
-            入力された生徒の振り返り記述から、学習内容の理解を深めるための知識マップを生成してください。
-            - 振り返りの中心となる重要な概念を5つ以内のノードとして抽出します。
-            - 各ノードには、140字以内で簡潔な説明文（sentence）を生成します。
-            - ノード間の関連性をエッジとして定義します。
-            - 出力は必ず以下のJSON形式に従ってください。
-            - また、振り返り記述の内容にのみ基づき、ノードとエッジを生成してください。
-            {{
-              "nodes": [
-                {{"id": "unique_id_1", "label": "ノード名1", "sentence": "説明文1"}},
-                {{"id": "unique_id_2", "label": "ノード名2", "sentence": "説明文2"}}
-              ],
-              "edges": [
-                {{"source": "unique_id_1", "target": "unique_id_2"}}
-              ]
-            }}
-            入力:
-            ---
-            {content}
-            ---
-            """
-            client = openai.OpenAI(api_key=OPENAI_API_KEY)
-            chat_completion = client.chat.completions.create(
-                messages=[
-                    {"role": "system", "content": "あなたは優秀な教員アシスタントで、与えられたテキストから知識マップをJSON形式で生成します。"},
-                    {"role": "user", "content": prompt_text}
-                ],
-                model="gpt-4o",
-                response_format={"type": "json_object"},
-                temperature=0.2
-            )
-            response_content = chat_completion.choices[0].message.content
-            map_data = json.loads(response_content)
-            app.logger.info("Successfully generated map from OpenAI.")
-        except Exception as e:
-            app.logger.error(f"OpenAI API Error: {e}", exc_info=True)
-            # APIエラー時はフォールバックするため、処理を続行
-            map_data = None
-    
-    # APIキーがない、またはAPI呼び出しに失敗した場合のフォールバック処理
-    if map_data is None:
-        app.logger.warning("Falling back to initial placeholder map.")
-        map_data = {
-            "nodes": [{
-                "id": f"initial-node-{uuid.uuid4().hex}", 
-                "data": {"label": content[:30] or "最初のノード"}, # フロントエンドの構造に合わせてdataプロパティを追加
-                "position": {"x": 100, "y": 100}
-            }],
-            "edges": []
-        }
-
-    # --- データベースへのアトミックな保存 ---
-    try:
-        new_memo = Memo(user_id=user_id, content=content)
-        new_history_entry = MapHistory(map_data=map_data)
-        new_memo.history_entries.append(new_history_entry)
-        
-        db.session.add(new_memo)
-        db.session.commit()
-        
-        app.logger.info(f"Successfully created memo {new_memo.id} and map history {new_history_entry.id} in DB.")
-
-        return jsonify({
-            "memo": {
-                "id": new_memo.id,
-                "content": new_memo.content,
-                "created_at": new_memo.created_at.isoformat()
-            },
-            "map": {
-                "memo_id": new_memo.id,
-                "map_data": map_data,
-                "generated_at": new_history_entry.created_at.isoformat()
-            }
-        }), 201
-
-    except Exception as e:
-        db.session.rollback() 
-        app.logger.error(f"Database error during memo/map creation: {e}", exc_info=True)
-        return jsonify({"message": "Database transaction failed."}), 500
-    
-# ★★★ 修正: 既存のマップ生成関数を、履歴追加に特化させる ★★★
 @app.route('/api/memos/<int:memo_id>/generate_map', methods=['POST'])
 @token_required
 def generate_map_for_memo(memo_id):
     user_id = g.current_user_id
+    # ★★★ 修正点: `user_id=user_id` のようにキーワード引数にする ★★★
     memo = Memo.query.filter_by(id=memo_id, user_id=user_id).first()
     if not memo:
         return jsonify({"message": "Memo not found or access denied"}), 404
 
-    map_data_to_save = None
-    
-    # OpenAI APIキーが設定されている場合のみAPIを呼び出す
-    if os.getenv("OPENAI_API_KEY"):
-        try:
-            prompt_text = f"""
-            入力された生徒の振り返り記述から、学習内容の理解を深めるための知識マップを生成してください。
-            - 振り返りの中心となる重要な概念をノードとして抽出します。
-            - 各ノードには、140字以内で簡潔な説明文（sentence）を生成します。
-            - ノード間の関連性をエッジとして定義します。
-            - 出力は必ず以下のJSON形式に従ってください。
-            {{
-              "nodes": [
-                {{"id": "unique_id_1", "label": "ノード名1", "sentence": "説明文1"}},
-                {{"id": "unique_id_2", "label": "ノード名2", "sentence": "説明文2"}}
-              ],
-              "edges": [
-                {{"source": "unique_id_1", "target": "unique_id_2"}}
-              ]
-            }}
-            入力:
-            ---
-            {memo.content}
-            ---
-            """
-            client = openai.OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
-            chat_completion = client.chat.completions.create(
-                messages=[
-                    {"role": "system", "content": "あなたは優秀な教員アシスタントで、与えられたテキストから知識マップをJSON形式で生成します。"},
-                    {"role": "user", "content": prompt_text}
-                ],
-                model="gpt-4o", # 推奨モデル
-                response_format={"type": "json_object"},
-                temperature=0.2
-            )
-            response_content = chat_completion.choices[0].message.content
-            map_data_to_save = json.loads(response_content)
-        except Exception as e:
-            app.logger.error(f"OpenAI API Error for memo {memo_id}: {e}", exc_info=True)
-            # APIエラー時はダミーデータにフォールバック
-            map_data_to_save = None
+    if not memo:
+        app.logger.warning(f"Memo {memo_id} not found or access denied for user {user_id} during map generation.")
+        return jsonify({"message": "Memo not found or access denied"}), 404
 
-    # APIキーがない、またはAPI呼び出しに失敗した場合
-    if map_data_to_save is None:
-        map_data_to_save = {
-            "nodes": [{"id": "dummy_node_1", "data": {"label": "主要な概念"}, "position": {"x": 100, "y": 100}}],
-            "edges": []
+    if not OPENAI_API_KEY or OPENAI_API_KEY == "YOUR_OPENAI_API_KEY_HERE":
+        app.logger.info(f"Using dummy map data for memo {memo_id} as OpenAI API key is not set.")
+        dummy_map_data = {
+            "nodes": [
+                {"id": "dummy_node_map_1", "label": memo.content[:15] + " - 主要点1", "sentence": "これは学習メモから生成された主要な概念のダミーノード1です。"},
+                {"id": "dummy_node_map_2", "label": memo.content[15:30] + " - 主要点2", "sentence": "APIキーを設定すると、メモ内容に基づいたマップが生成されます。"},
+                {"id": "dummy_node_map_3", "label": "関連概念A", "sentence": "主要点に関連する概念のダミーです。"}
+            ],
+            "edges": [
+                {"from": "dummy_node_map_1", "to": "dummy_node_map_3"},
+                {"from": "dummy_node_map_2", "to": "dummy_node_map_3"}
+            ]
         }
+        knowledge_map_entry = KnowledgeMap.query.filter_by(memo_id=memo.id).first()
+        if not knowledge_map_entry:
+            knowledge_map_entry = KnowledgeMap(memo_id=memo.id, map_data=dummy_map_data)
+            db.session.add(knowledge_map_entry)
+        else:
+            knowledge_map_entry.map_data = dummy_map_data
+            knowledge_map_entry.generated_at = datetime.utcnow()
+        try:
+            db.session.commit()
+            app.logger.info(f"Dummy map data saved for memo {memo_id}")
+            return jsonify({"memo_id": memo.id, "map_data": dummy_map_data, "generated_at": knowledge_map_entry.generated_at.isoformat(), "message": "Using dummy map data as OpenAI API key is not set."}), 200
+        except Exception as e:
+            db.session.rollback()
+            app.logger.error(f"DB error saving dummy map for memo {memo_id}: {e}")
+            return jsonify({"message": "DB error saving dummy map"}), 500
 
     try:
-        # 常に新しい履歴として保存
-        new_history_entry = MapHistory(memo_id=memo_id, map_data=map_data_to_save)
+        prompt_text = f"""
+入力に生徒の振り返り記述のうち名詞のみを抽出したものが与えられる。
+ これらをノードとして，振り返りのマップを作成せよ。すべての名詞を用いる必要はない。""学習を深める単元の特徴的な単語のみ""を抽出せよ。
+
+・それぞれのノードに対して、140字以内で説明文を生成せよ。
+・高さは自由である．他の要素を足してはいけない 
+・作成した木を見返してもいいように、"学習の理解を深める内容のみ"であること。
+・短文で，振り返りの内容が少なければ，ノードは1つのみで良い
+・出力するラベルは振り返り文を踏まえ，シンプルなものにすること
+・出力形式はJSONオブジェクトのリスト形式で、リスト全体を返してください
+        {{
+          "nodes": [
+            {{'id':i,'label':'node_name','sentence':'writetext','extend_query':['relate contents1','relate contents2','relate contents3','relate contents4','relate contents5']}},
+            {{'id':j,'label':'node_name','sentence':'writetext','extend_query':['relate contents1','relate contents2','relate contents3','relate contents4','relate contents5']}}
+          ],
+          "edges": [
+            {{"source": "i", "target": "j"}}
+          ]
+        }}
+
+        nodes：ノードが格納される。idにはノードの番号を格納。labelにはノード名、sentenceには説明文を140字以内で、extend_queryではそのノードについてwikipediaにおける拡張概念を5つ程度リストによって格納する。
+        edges：エッジが格納される。fromには始点のノード番号、toには終点のノード番号を格納する。
+        入力
+        ---
+        {memo.content}
+        ---
+        """
+        
+        client = openai.OpenAI(api_key=OPENAI_API_KEY)
+        chat_completion = client.chat.completions.create(
+            messages=[
+                {"role": "system", "content": "あなたは優秀な教員アシスタントで、与えられたテキストから知識マップをJSON形式で生成します。"},
+                {"role": "user", "content": prompt_text}
+            ],
+            model="gpt-4.1",
+            response_format={ "type": "json_object" } ,
+            temperature=0.0
+        )
+        
+        response_content = chat_completion.choices[0].message.content
+        app.logger.info(f"OpenAI response for generate_map (memo {memo_id}): {response_content}")
+        
+        map_data_json = json.loads(response_content)
+        
+        if not isinstance(map_data_json, dict) or "nodes" not in map_data_json or "edges" not in map_data_json or \
+           not isinstance(map_data_json["nodes"], list) or not isinstance(map_data_json["edges"], list):
+            app.logger.error(f"OpenAI response for generate_map (memo {memo_id}) is not in the expected format: {map_data_json}")
+            raise ValueError("OpenAI response is not in the expected format of {{'nodes': [], 'edges': []}}")
+
+        knowledge_map_entry = KnowledgeMap.query.filter_by(memo_id=memo.id).first()
+        if not knowledge_map_entry:
+            knowledge_map_entry = KnowledgeMap(memo_id=memo.id, map_data=map_data_json)
+            db.session.add(knowledge_map_entry)
+        else:
+            knowledge_map_entry.map_data = map_data_json
+            knowledge_map_entry.generated_at = datetime.utcnow()
+        new_history_entry = MapHistory(memo_id=memo_id, map_data=map_data_json)
         db.session.add(new_history_entry)
         db.session.commit()
+        
         return jsonify({
             "memo_id": memo_id, 
-            "map_data": map_data_to_save, 
+            "map_data": map_data_json, 
             "generated_at": new_history_entry.created_at.isoformat()
         }), 200
+
+    except openai.APIError as e:
+        app.logger.error(f"OpenAI API Error during map generation for memo {memo_id}: {e}", exc_info=True)
+        return jsonify({"message": f"OpenAI API Error: {str(e)}"}), 503
+    except ValueError as e:
+        app.logger.error(f"Data processing error for generate_map (memo {memo_id}): {e}", exc_info=True)
+        return jsonify({"message": f"Data processing error: {str(e)}"}), 500
     except Exception as e:
         db.session.rollback()
-        app.logger.error(f"DB error saving new map history for memo {memo_id}: {e}", exc_info=True)
-        return jsonify({"message": "Database error while saving map"}), 500
+        app.logger.error(f"Error generating map for memo {memo_id}: {e}", exc_info=True)
+        return jsonify({"message": f"Error generating map: {str(e)}"}), 500
 
 @app.route('/api/nodes/<path:node_label>/suggest_related', methods=['GET'])
 @token_required
@@ -1093,11 +1037,15 @@ def get_combined_map():
         return jsonify({"message": "Failed to fetch combined map data"}), 500
 # =============================================================================
 
-# ★★★ 修正点: アプリケーション起動時にテーブルを自動作成する処理 ★★★
+# --- アプリケーションの初期化と実行 ---
 with app.app_context():
     db.create_all()
-    app.logger.info("Database tables checked and created on startup if they didn't exist.")
+    load_allowed_users()
+    app.logger.info("Database tables created (if they didn't exist).")
 
 if __name__ == '__main__':
-    # ローカルでの実行時にもテーブルが作成される
+    with app.app_context():
+        # Create database tables if they don't exist
+        db.create_all()
+        app.logger.info("Database tables checked/created.")
     app.run(debug=True, port=5001)
