@@ -536,6 +536,7 @@ def create_memo_with_map():
 ・短文で，振り返りの内容が少なければ，ノードは1つのみで良い
 ・出力するラベルは振り返り文を踏まえ，シンプルなものにすること
 ・出力形式はJSONオブジェクトのリスト形式で、リスト全体を返してください
+・出力と説明文は英語で行うこと
         {{
           "nodes": [
             {{'id':i,'label':'node_name','sentence':'writetext','extend_query':['relate contents1','relate contents2','relate contents3','relate contents4','relate contents5']}},
@@ -691,6 +692,7 @@ def generate_map_for_memo(memo_id):
 ・短文で，振り返りの内容が少なければ，ノードは1つのみで良い
 ・出力するラベルは振り返り文を踏まえ，シンプルなものにすること
 ・出力形式はJSONオブジェクトのリスト形式で、リスト全体を返してください
+・出力と説明文は英語で行うこと
         {{
           "nodes": [
             {{'id':i,'label':'node_name','sentence':'writetext','extend_query':['relate contents1','relate contents2','relate contents3','relate contents4','relate contents5']}},
