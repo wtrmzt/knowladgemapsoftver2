@@ -15,7 +15,7 @@ const Navbar: React.FC<{ isAuthenticated: boolean; isAdmin: boolean; onLogout: (
   return (
     <header className="bg-card border-b flex-shrink-0">
       <nav className="container mx-auto px-4 py-3 flex justify-between items-center">
-        <Link to={isAdmin ? "/admin" : "/dashboard"} className="font-bold">知識マップツール</Link>
+        <Link to={isAdmin ? "/admin" : "/dashboard"} className="font-bold">KnowledgeMap Tool</Link>
         <div className="flex items-center gap-4">
           {isAdmin && (
             <Link to="/admin" className="text-sm text-primary hover:underline flex items-center">

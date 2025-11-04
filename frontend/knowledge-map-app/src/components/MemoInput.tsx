@@ -92,7 +92,7 @@ function MemoInput({ initialText, onSave, memokey }: MemoInputProps) {
         ref={textareaRef}
         value={text}
         onChange={(e) => setText(e.target.value)}
-        placeholder="ここに学習した内容をメモしましょう..."
+        placeholder="Write your memo here..."
         // ★★★ ここが重要な修正点 ★★★
         // ダークモード用のスタイルと、レイアウト用のスタイルを統合
         className="
@@ -115,7 +115,7 @@ function MemoInput({ initialText, onSave, memokey }: MemoInputProps) {
       {/* 保存ボタンは現状のままでOKです */}
       <Button onClick={handleSaveClick} className="mt-4 w-full flex-shrink-0 bg-green-600 hover:bg-green-500">
         <Save className="mr-2 h-4 w-4" />
-        メモを保存/マップの新規作成
+        Save Memo/Create Map
       </Button>
     </div>
   );
