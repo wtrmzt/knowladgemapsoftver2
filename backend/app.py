@@ -12,6 +12,7 @@ from functools import wraps
 import pandas as pd
 import jwt
 from sqlalchemy import func, distinct, and_
+import uuid # ★ 修正点: UUIDライブラリをインポート
 
 # =============================================================================
 # 1. Flask App Setup
@@ -22,13 +23,8 @@ app = Flask(__name__)
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 # --- アプリケーションの設定 ---
-# CORS設定 (異なるオリジンからのリクエストを許可)
-# これにより、手動でのOPTIONSメソッドの処理が不要になります。
-CORS(app, 
-     resources={r"/api/*": {"origins": "http://localhost:5173"}}, 
-     supports_credentials=True,
-     allow_headers=["Content-Type", "Authorization"]
-)
+# ★★★ 修正点: 最初のCORS設定を削除 ★★★
+# (ここに古いCORS設定がありましたが、重複するため削除しました)
 
 
 # 1. データベース設定部分の修正
@@ -67,9 +63,13 @@ else:
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 app.config['ADMIN_USERNAME'] = os.getenv('ADMIN_USERNAME', 'admin')
 
-frontend_url = os.getenv('FRONTEND_URL', 'http://localhost:5173')
+# ★★★ 修正点: CORS設定をこちらに統合し、本番環境とローカルの両方を許可 ★★★
+# Renderデプロイ先のURLとローカル開発環境の両方を許可します
+frontend_url = os.getenv('FRONTEND_URL', 'https://knowladgemap-frontend.onrender.com') # デフォルトを本番URLに変更
+local_url = "http://localhost:5173"
+
 CORS(app, 
-     resources={r"/api/*": {"origins": frontend_url}}, 
+     resources={r"/api/*": {"origins": [frontend_url, local_url]}}, # ★ 修正: リストで複数のオリジンを許可
      supports_credentials=True,
      allow_headers=["Content-Type", "Authorization"]
 )
@@ -140,9 +140,11 @@ def admin_required(f):
     return decorated
 
 # --- CORSプリフライトリクエストの処理 ---
+# ( flask-cors が自動で処理するため、手動の _build_cors_preflight_response は不要な場合が多い)
+# ただし、一部のルートで手動定義されているため残します。
 def _build_cors_preflight_response():
     response = make_response()
-    response.headers.add("Access-Control-Allow-Origin", "*")
+    response.headers.add("Access-Control-Allow-Origin", "*") # ★ 本番ではオリジンを限定すべき
     response.headers.add('Access-Control-Allow-Headers', "Content-Type,Authorization")
     response.headers.add('Access-Control-Allow-Methods', "GET,POST,PUT,DELETE,OPTIONS")
     return response
@@ -184,7 +186,7 @@ def login():
 # 2. Database Models
 # =============================================================================
 from sqlalchemy.dialects.postgresql import UUID
-import uuid
+# import uuid (上部でインポート済み)
 
 class User(db.Model):
     __tablename__ = 'users'  # テーブル名を明示的に指定
@@ -250,13 +252,14 @@ def get_current_user():
     return None
 
 # ★★★ 未定義だったCORSプリフライトリクエスト用のヘルパー関数を追加 ★★★
-def _build_cors_preflight_response():
-    """CORSのプリフライトリクエストに対するレスポンスを構築する"""
-    response = jsonify(message="CORS preflight successful")
-    response.headers.add("Access-Control-Allow-Origin", "*")
-    response.headers.add("Access-Control-Allow-Headers", "Content-Type,Authorization")
-    response.headers.add("Access-Control-Allow-Methods", "GET,POST,OPTIONS")
-    return response
+# (重複定義されていたものを一つに統合)
+# def _build_cors_preflight_response():
+#     """CORSのプリフライトリクエストに対するレスポンスを構築する"""
+#     response = jsonify(message="CORS preflight successful")
+#     response.headers.add("Access-Control-Allow-Origin", "*")
+#     response.headers.add("Access-Control-Allow-Headers", "Content-Type,Authorization")
+#     response.headers.add("Access-Control-Allow-Methods", "GET,POST,OPTIONS")
+#     return response
 
 # =============================================================================
 # 4. API Endpoints
@@ -485,6 +488,126 @@ def handle_memos():
     # user_idを使って、そのユーザーのメモのみを取得
     memos = Memo.query.filter_by(user_id=user_id).order_by(Memo.created_at.desc()).all()
     return jsonify([{"id": m.id, "content": m.content, "created_at": m.created_at.isoformat()} for m in memos]), 200
+
+
+# ★★★ 修正点: 存在しなかった /api/memos_with_map ルートを新規作成 ★★★
+@app.route('/api/memos_with_map', methods=['POST'])
+@token_required
+def create_memo_with_map():
+    """メモを作成し、同時にマップも生成するエンドポイント"""
+    user_id = g.current_user_id
+    data = request.get_json()
+    if not data or not data.get('content'): 
+        return jsonify({"message": "Memo content is required"}), 400
+    
+    memo_content = data['content']
+    
+    try:
+        # 1. メモを作成
+        memo = Memo(user_id=user_id, content=memo_content)
+        db.session.add(memo)
+        db.session.flush() # これにより、コミット前に memo.id を取得できる
+        
+        app.logger.info(f"New memo created with id {memo.id} for user {user_id}")
+
+        # 2. マップを生成 (generate_map_for_memo のロジックを流用)
+        map_data_json = {}
+        
+        if not OPENAI_API_KEY or OPENAI_API_KEY == "YOUR_OPENAI_API_KEY_HERE":
+            app.logger.info(f"Using dummy map data for new memo {memo.id} as OpenAI API key is not set.")
+            map_data_json = {
+                "nodes": [
+                    {"id": "dummy_node_map_1", "label": memo.content[:15] + " - 主要点1", "sentence": "これは学習メモから生成された主要な概念のダミーノード1です。"},
+                    {"id": "dummy_node_map_2", "label": memo.content[15:30] + " - 主要点2", "sentence": "APIキーを設定すると、メモ内容に基づいたマップが生成されます。"},
+                ],
+                "edges": [
+                    {"from": "dummy_node_map_1", "to": "dummy_node_map_2"}
+                ]
+            }
+        else:
+            app.logger.info(f"Generating real map data for new memo {memo.id}")
+            prompt_text = f"""
+入力に生徒の振り返り記述のうち名詞のみを抽出したものが与えられる。
+ これらをノードとして，振り返りのマップを作成せよ。すべての名詞を用いる必要はない。""学習を深める単元の特徴的な単語のみ""を抽出せよ。
+
+・それぞれのノードに対して、140字以内で説明文を生成せよ。
+・高さは自由である．他の要素を足してはいけない 
+・作成した木を見返してもいいように、"学習の理解を深める内容のみ"であること。
+・短文で，振り返りの内容が少なければ，ノードは1つのみで良い
+・出力するラベルは振り返り文を踏まえ，シンプルなものにすること
+・出力形式はJSONオブジェクトのリスト形式で、リスト全体を返してください
+        {{
+          "nodes": [
+            {{'id':i,'label':'node_name','sentence':'writetext','extend_query':['relate contents1','relate contents2','relate contents3','relate contents4','relate contents5']}},
+            {{'id':j,'label':'node_name','sentence':'writetext','extend_query':['relate contents1','relate contents2','relate contents3','relate contents4','relate contents5']}}
+          ],
+          "edges": [
+            {{"source": "i", "target": "j"}}
+          ]
+        }}
+
+        nodes：ノードが格納される。idにはノードの番号を格納。labelにはノード名、sentenceには説明文を140字以内で、extend_queryではそのノードについてwikipediaにおける拡張概念を5つ程度リストによって格納する。
+        edges：エッジが格納される。fromには始点のノード番号、toには終点のノード番号を格納する。
+        入力
+        ---
+        {memo.content}
+        ---
+            """
+            
+            client = openai.OpenAI(api_key=OPENAI_API_KEY)
+            chat_completion = client.chat.completions.create(
+                messages=[
+                    {"role": "system", "content": "あなたは優秀な教員アシスタントで、与えられたテキストから知識マップをJSON形式で生成します。"},
+                    {"role": "user", "content": prompt_text}
+                ],
+                model="gpt-4.1",
+                response_format={ "type": "json_object" } ,
+                temperature=0.0
+            )
+            
+            response_content = chat_completion.choices[0].message.content
+            app.logger.info(f"OpenAI response for new memo {memo.id}: {response_content}")
+            map_data_json = json.loads(response_content)
+            
+            if not isinstance(map_data_json, dict) or "nodes" not in map_data_json or "edges" not in map_data_json:
+                app.logger.error(f"OpenAI response for new memo {memo.id} is not in expected format.")
+                raise ValueError("OpenAI response is not in the expected format")
+
+        # 3. マップ履歴を保存
+        new_history_entry = MapHistory(memo_id=memo.id, map_data=map_data_json)
+        db.session.add(new_history_entry)
+        
+        # 4. トランザクションをコミット
+        db.session.commit()
+        
+        app.logger.info(f"Successfully created memo {memo.id} and map history {new_history_entry.id}")
+        
+        # 5. フロントエンドに新しいメモとマップの両方を返す
+        return jsonify({
+            "memo": {
+                "id": memo.id, 
+                "content": memo.content, 
+                "created_at": memo.created_at.isoformat()
+            },
+            "map": {
+                "memo_id": memo.id, 
+                "map_data": map_data_json, 
+                "generated_at": new_history_entry.created_at.isoformat()
+            }
+        }), 201
+
+    except openai.APIError as e:
+        db.session.rollback()
+        app.logger.error(f"OpenAI API Error during memo_with_map creation: {e}", exc_info=True)
+        return jsonify({"message": f"OpenAI API Error: {str(e)}"}), 503
+    except ValueError as e:
+        db.session.rollback()
+        app.logger.error(f"Data processing error for memo_with_map: {e}", exc_info=True)
+        return jsonify({"message": f"Data processing error: {str(e)}"}), 500
+    except Exception as e:
+        db.session.rollback()
+        app.logger.error(f"Error in create_memo_with_map: {e}", exc_info=True)
+        return jsonify({"message": f"Error creating memo and map: {str(e)}"}), 500
 
 
 # ★★★ 修正: 重複を削除し、ここに一つだけ定義 ★★★
@@ -754,40 +877,12 @@ def calculate_temporal_related_nodes():
         app.logger.error(f"API Error: Error calculating temporal related nodes for '{input_node_data.get('label')}': {e}", exc_info=True)
         return jsonify({"message": f"時系列関連ノードの算出中に予期せぬエラーが発生しました。"}), 500
 
-@app.route('/api/maps/<int:memo_id>', methods=['PUT'])
-@token_required
-def update_map(memo_id):
-    user_id = g.current_user_id
-    app.logger.info(f"[update_map] Received request for memo_id: {memo_id} from user_id: {user_id}")
-
-    memo = Memo.query.filter_by(id=memo_id).first()
-    if not memo:
-        app.logger.warning(f"[update_map] Memo with id {memo_id} not found.")
-        return jsonify({"message": "Memo not found"}), 404
-    
-    if not g.is_admin and memo.user_id != user_id:
-        app.logger.warning(f"[update_map] Access denied for user {user_id} on memo {memo_id}")
-        return jsonify({"message": "Access denied"}), 403
-
-    new_map_data = request.get_json()
-    if not new_map_data or 'nodes' not in new_map_data or 'edges' not in new_map_data:
-        app.logger.error("[update_map] Invalid map data format received.")
-        return jsonify({"message": "Invalid map data format"}), 400
-
-    try:
-        app.logger.info(f"[update_map] Creating new MapHistory entry for memo_id: {memo_id}")
-        new_history_entry = MapHistory(memo_id=memo_id, map_data=new_map_data)
-        db.session.add(new_history_entry)
-        
-        app.logger.info("[update_map] Committing transaction to the database...")
-        db.session.commit()
-        app.logger.info("[update_map] Commit successful.")
-        
-        return jsonify({"message": "Map history created successfully"}), 200
-    except Exception as e:
-        db.session.rollback()
-        app.logger.error(f"[update_map] Failed to create map history for memo {memo_id}: {e}", exc_info=True)
-        return jsonify({"message": "Failed to create map history"}), 500
+# ★★★ 修正点: /api/maps/<int:memo_id> GET/PUT を処理する handle_single_map が
+# すでに存在するため、この重複した 'update_map' 関数を削除しました。
+# @app.route('/api/maps/<int:memo_id>', methods=['PUT'])
+# @token_required
+# def update_map(memo_id):
+#     ... (重複したコード) ...
 
 # =============================================================================
 # 5. Admin API Endpoints
@@ -844,7 +939,7 @@ def get_system_stats():
         app.logger.error(f"Error fetching stats: {e}", exc_info=True)
         return jsonify({"message": "Failed to fetch system statistics"}), 500
 
-import uuid # ★ 変更点: UUIDライブラリをインポート
+# import uuid (上部でインポート済み)
 
 @app.route('/api/nodes/create_manual', methods=['POST'])
 @token_required
