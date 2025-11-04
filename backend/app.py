@@ -790,6 +790,7 @@ def suggest_related_nodes_api(node_label):
         prompt_text = f"""
         与えられた中心トピック「{node_label}」について、学習を深めるための関連キーワードや補足情報を3つ提案してください。
         各提案は、以下のJSONオブジェクトのリスト形式で、リスト全体を返してください:
+        ・出力と説明文は英語で行うこと
         [
             {{'id':add_i,'label':'node_name','sentence':'writetext','extend_query':['relate contents1','relate contents2','relate contents3','relate contents4','relate contents5']}},
             {{'id':add_j,'label':'node_name','sentence':'writetext','extend_query':['relate contents1','relate contents2','relate contents3','relate contents4','relate contents5']}}
