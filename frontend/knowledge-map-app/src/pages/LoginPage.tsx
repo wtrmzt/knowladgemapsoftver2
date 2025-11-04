@@ -12,11 +12,19 @@ interface LoginPageProps {
   onLoginSuccess: () => void;
 }
 
+const DEMO_USERNAME = 'demo_user'; // このユーザーで自動ログインします
+
 function LoginPage({ onLoginSuccess }: LoginPageProps) {
   const navigate = useNavigate();
   const { toast } = useToast();
-  const [username, setUsername] = useState('');
-  const [isLoading, setIsLoading] = useState(false);
+
+
+  // ★ 変更点: username の初期値をデモユーザーIDに設定
+  const [username, setUsername] = useState(DEMO_USERNAME);
+  const [isLoading, setIsLoading] = useState(true); // ★ 変更点: 初期値を true にしてローディング開始
+
+  //const [username, setUsername] = useState('');
+  //const [isLoading, setIsLoading] = useState(false);
 
   const handleLogin = async () => {
     if (!username.trim()) {
